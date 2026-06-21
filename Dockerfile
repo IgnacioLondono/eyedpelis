@@ -1,21 +1,24 @@
-FROM node:22-alpine AS client-build
+FROM node:22-slim AS client-build
 WORKDIR /app/client
 COPY client/package*.json ./
 RUN npm ci
 COPY client/ ./
+ENV NODE_OPTIONS=--max-old-space-size=2048
 RUN npm run build
 
-FROM node:22-alpine AS server-build
+FROM node:22-slim AS server-build
 WORKDIR /app/server
 COPY server/package*.json ./
 RUN npm ci
 COPY server/ ./
 RUN npm run build
 
-FROM node:22-alpine
+FROM node:22-slim
 WORKDIR /app
 
-RUN apk add --no-cache ffmpeg
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ffmpeg \
+  && rm -rf /var/lib/apt/lists/*
 
 ENV NODE_ENV=production
 ENV PORT=3001

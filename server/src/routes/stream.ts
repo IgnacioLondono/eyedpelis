@@ -83,7 +83,7 @@ router.get('/:id/compat', async (req, res) => {
     else res.end();
   });
 
-  ffmpeg.stderr.on('data', chunk => {
+  ffmpeg.stderr.on('data', (chunk: Buffer) => {
     console.error('[ffmpeg compat]', chunk.toString().trim());
   });
 
