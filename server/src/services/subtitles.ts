@@ -1,17 +1,41 @@
 import fs from 'fs';
 import path from 'path';
 import type { SubtitleTrack } from '../types.js';
+import { findEmbeddedSubtitles, getEmbeddedSubtitleVtt } from './embeddedSubtitles.js';
 
 const SUBTITLE_EXTENSIONS = new Set(['.srt', '.vtt', '.ass', '.ssa']);
 
 const LANG_MAP: Record<string, string> = {
   spa: 'Español', es: 'Español', esp: 'Español',
   eng: 'English', en: 'English',
-  fre: 'Français', fr: 'Français',
-  ger: 'Deutsch', de: 'Deutsch',
+  fre: 'Francés', fr: 'Francés', fra: 'Francés',
+  ger: 'Alemán', de: 'Deutsch', deu: 'Deutsch',
   ita: 'Italiano', it: 'Italiano',
-  por: 'Português', pt: 'Português',
+  por: 'Portugués', pt: 'Portugués',
+  jpn: 'Japonés', ja: 'Japonés',
+  und: 'Desconocido',
 };
+
+export function langLabelFromCode(code: string): string {
+  const c = code.toLowerCase();
+  return LANG_MAP[c] || LANG_MAP[c.slice(0, 2)] || c.toUpperCase();
+}
+
+export function sortSubtitleTracks(tracks: SubtitleTrack[]): SubtitleTrack[] {
+  return [...tracks].sort((a, b) => {
+    const aEs = a.language === 'spa' || a.language === 'es' || a.language.startsWith('es');
+    const bEs = b.language === 'spa' || b.language === 'es' || b.language.startsWith('es');
+    if (aEs && !bEs) return -1;
+    if (bEs && !aEs) return 1;
+    return a.label.localeCompare(b.label);
+  });
+}
+
+function langMatches(a: string, b: string): boolean {
+  const x = a.toLowerCase();
+  const y = b.toLowerCase();
+  return x === y || x.startsWith(y) || y.startsWith(x) || (x.startsWith('es') && y.startsWith('es'));
+}
 
 export function findSubtitles(videoPath: string): SubtitleTrack[] {
   const dir = path.dirname(videoPath);
@@ -34,7 +58,7 @@ export function findSubtitles(videoPath: string): SubtitleTrack[] {
 
     const suffix = fileBase.slice(base.length).replace(/^[\s._-]+/, '');
     const langCode = suffix.split(/[\s._-]/)[0]?.toLowerCase() || 'und';
-    const label = LANG_MAP[langCode] || langCode.toUpperCase();
+    const label = langLabelFromCode(langCode);
 
     tracks.push({
       path: path.join(dir, file).replace(/\\/g, '/'),
@@ -44,11 +68,20 @@ export function findSubtitles(videoPath: string): SubtitleTrack[] {
     });
   }
 
-  return tracks.sort((a, b) => {
-    if (a.language === 'spa' || a.language === 'es') return -1;
-    if (b.language === 'spa' || b.language === 'es') return 1;
-    return a.label.localeCompare(b.label);
-  });
+  return sortSubtitleTracks(tracks);
+}
+
+export async function findAllSubtitles(videoPath: string): Promise<SubtitleTrack[]> {
+  const external = findSubtitles(videoPath);
+  const embedded = await findEmbeddedSubtitles(videoPath);
+
+  const merged = [...external];
+  for (const emb of embedded) {
+    const duplicate = external.some(ext => langMatches(ext.language, emb.language));
+    if (!duplicate) merged.push(emb);
+  }
+
+  return sortSubtitleTracks(merged);
 }
 
 export function srtToVtt(content: string): string {
@@ -72,4 +105,17 @@ export function getSubtitleContent(filePath: string): { content: string; content
     return { content: srtToVtt(raw), contentType: 'text/vtt' };
   }
   return { content: raw, contentType: 'text/plain' };
+}
+
+export async function getSubtitleTrackContent(track: SubtitleTrack): Promise<{ content: string; contentType: string }> {
+  if (track.embedded && track.subIndex != null) {
+    const content = await getEmbeddedSubtitleVtt(track.path, track.subIndex);
+    return { content, contentType: 'text/vtt' };
+  }
+
+  if (!track.path || !fs.existsSync(track.path)) {
+    throw new Error('Archivo de subtítulo no encontrado');
+  }
+
+  return getSubtitleContent(track.path);
 }

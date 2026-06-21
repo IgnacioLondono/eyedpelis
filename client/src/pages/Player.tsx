@@ -2,12 +2,13 @@ import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api, posterUrl } from '../api';
 import VideoPlayer from '../components/VideoPlayer';
-import type { MediaItem } from '../types';
+import type { MediaItem, SubtitleTrack } from '../types';
 
 export default function Player() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [media, setMedia] = useState<MediaItem | null>(null);
+  const [subtitleTracks, setSubtitleTracks] = useState<SubtitleTrack[]>([]);
   const [episodeTitle, setEpisodeTitle] = useState<string | null>(null);
   const [useCompat, setUseCompat] = useState(false);
   const [audioWarning, setAudioWarning] = useState<string | null>(null);
@@ -26,6 +27,11 @@ export default function Player() {
       api.getStreamInfo(numId).catch(() => null),
     ]).then(async ([item, streamInfo]) => {
       setMedia(item);
+
+      const subs = streamInfo?.subtitles?.length
+        ? streamInfo.subtitles as SubtitleTrack[]
+        : (item.subtitles || []);
+      setSubtitleTracks(subs);
 
       if (streamInfo?.probe) {
         setProbeAudioTracks(streamInfo.probe.audioTracks);
@@ -73,7 +79,7 @@ export default function Player() {
     title = `${media.title} · T${String(media.season).padStart(2, '0')}E${String(media.episode).padStart(2, '0')}${epLabel}`;
   }
 
-  const subtitles = (media.subtitles || []).map((sub, index) => ({
+  const subtitles = subtitleTracks.map((sub, index) => ({
     index,
     label: sub.label,
     src: api.subtitleUrl(media.id, index),

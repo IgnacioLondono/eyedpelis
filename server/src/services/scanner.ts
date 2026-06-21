@@ -6,7 +6,7 @@ import {
 } from '../db/database.js';
 import { getMoviesPath, getSeriesPath, isMediaReadOnly } from '../config.js';
 import { enrichFromTmdb, tmdbMetadataWithGenres } from './tmdb.js';
-import { findSubtitles } from './subtitles.js';
+import { findAllSubtitles } from './subtitles.js';
 import { parseWithFolderContext } from './filenameParser.js';
 import type { MediaType, MediaItem } from '../types.js';
 
@@ -90,7 +90,7 @@ async function applyTmdbToItem(file: ParsedFile, tmdb: Awaited<ReturnType<typeof
 }
 
 async function enrichExistingItem(file: ParsedFile, existing: MediaItem) {
-  const subs = findSubtitles(file.filePath);
+  const subs = await findAllSubtitles(file.filePath);
   const updates: Partial<MediaItem> = { file_size: file.fileSize, subtitles: subs };
 
   if (!existing.tmdb_id || !existing.poster_path || !existing.genres) {
@@ -127,7 +127,7 @@ export async function scanLibrary(): Promise<ScanResult> {
   const seriesCache = new Map<string, number>();
 
   for (const file of files) {
-    const subs = findSubtitles(file.filePath);
+    const subs = await findAllSubtitles(file.filePath);
     const existingItem = getMediaByPath(file.filePath);
 
     if (existingItem) {

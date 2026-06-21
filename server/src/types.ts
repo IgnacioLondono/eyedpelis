@@ -29,6 +29,11 @@ export interface SubtitleTrack {
   label: string;
   language: string;
   format: 'srt' | 'vtt' | 'ass' | 'ssa';
+  /** Subtítulo dentro del contenedor MKV/MP4 */
+  embedded?: boolean;
+  /** Índice de pista de subtítulo para ffmpeg (-map 0:s:N) */
+  subIndex?: number;
+  streamIndex?: number;
 }
 
 export interface DownloadItem {

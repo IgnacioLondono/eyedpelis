@@ -6,6 +6,7 @@ data/
 .env
 server/.env
 server/data/
+**/subtitle-cache/
 *.db
 media/
 eyedpelis-deploy.zip

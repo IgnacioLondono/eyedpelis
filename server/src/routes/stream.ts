@@ -2,24 +2,52 @@ import { Router } from 'express';
 import fs from 'fs';
 import mime from 'mime-types';
 import { spawn } from 'child_process';
-import { getMediaById } from '../db/database.js';
-import { getSubtitleContent } from '../services/subtitles.js';
+import { getMediaById, updateMedia } from '../db/database.js';
+import { findAllSubtitles, getSubtitleTrackContent } from '../services/subtitles.js';
 import { probeMedia, codecLabel } from '../services/mediaProbe.js';
 
 const router = Router();
 
-router.get('/:id/subtitle/:index', (req, res) => {
+async function syncSubtitles(item: NonNullable<ReturnType<typeof getMediaById>>) {
+  if (!item.file_path || !fs.existsSync(item.file_path)) return item.subtitles || [];
+
+  const allSubs = await findAllSubtitles(item.file_path);
+  const current = item.subtitles || [];
+  const changed = allSubs.length !== current.length
+    || allSubs.some((s, i) => s.label !== current[i]?.label || s.embedded !== current[i]?.embedded);
+
+  if (changed) {
+    updateMedia(item.id, { subtitles: allSubs });
+    return allSubs;
+  }
+  return current;
+}
+
+router.get('/:id/subtitle/:index', async (req, res) => {
   const item = getMediaById(parseInt(req.params.id));
   const index = parseInt(req.params.index);
-  const track = item?.subtitles?.[index];
+  let track = item?.subtitles?.[index];
 
-  if (!track || !fs.existsSync(track.path)) {
+  if (!item) return res.status(404).json({ error: 'No encontrado' });
+
+  if (!track && item.file_path) {
+    const synced = await syncSubtitles(item);
+    track = synced[index];
+  }
+
+  if (!track) {
     return res.status(404).json({ error: 'Subtítulo no encontrado' });
   }
 
-  const { content, contentType } = getSubtitleContent(track.path);
-  res.setHeader('Content-Type', contentType);
-  res.send(content);
+  try {
+    const { content, contentType } = await getSubtitleTrackContent(track);
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Cache-Control', track.embedded ? 'public, max-age=86400' : 'public, max-age=3600');
+    res.send(content);
+  } catch (err) {
+    console.error('[subtitle]', err);
+    res.status(500).json({ error: 'No se pudo extraer el subtítulo' });
+  }
 });
 
 router.get('/:id/info', async (req, res) => {
@@ -28,15 +56,18 @@ router.get('/:id/info', async (req, res) => {
 
   const exists = item.file_path ? fs.existsSync(item.file_path) : false;
   let probe = null;
+  let subtitles = item.subtitles || [];
+
   if (exists && item.file_path) {
     probe = await probeMedia(item.file_path);
+    subtitles = await syncSubtitles(item);
   }
 
   res.json({
     title: item.title,
     file_path: item.file_path,
     file_size: item.file_size,
-    subtitles: item.subtitles || [],
+    subtitles,
     exists,
     probe: probe ? {
       ...probe,

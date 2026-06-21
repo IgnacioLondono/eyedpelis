@@ -3,6 +3,7 @@ export interface SubtitleTrack {
   label: string;
   language: string;
   format: string;
+  embedded?: boolean;
 }
 
 export interface MediaItem {

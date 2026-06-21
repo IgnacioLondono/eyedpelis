@@ -118,6 +118,7 @@ export const api = {
   },
   getStreamInfo: (id: number) =>
     request<{
+      subtitles: Array<{ index?: number; label: string; language: string; embedded?: boolean }>;
       probe: {
         browserFriendlyAudio: boolean;
         recommendedAudioIndex: number;
