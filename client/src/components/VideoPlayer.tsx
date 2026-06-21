@@ -17,16 +17,18 @@ interface AudioOption {
   language: string;
 }
 
-interface BrowserAudioTrack {
+interface VideoAudioTrack {
   enabled: boolean;
   label: string;
   language: string;
 }
 
-interface AudioTrackList {
+interface VideoAudioTrackList {
   length: number;
-  [index: number]: BrowserAudioTrack;
+  [index: number]: VideoAudioTrack;
 }
+
+type VideoWithAudioTracks = HTMLVideoElement & { audioTracks?: VideoAudioTrackList };
 
 interface Props {
   src: string;
@@ -125,7 +127,7 @@ export default function VideoPlayer({
   }, []);
 
   const applyAudioTrack = useCallback((trackIndex: number) => {
-    const v = videoRef.current as HTMLVideoElement & { audioTracks?: AudioTrackList };
+    const v = videoRef.current as VideoWithAudioTracks;
     if (!v?.audioTracks || v.audioTracks.length === 0) return;
     const idx = Math.max(0, Math.min(trackIndex, v.audioTracks.length - 1));
     for (let i = 0; i < v.audioTracks.length; i++) {
@@ -143,7 +145,7 @@ export default function VideoPlayer({
   }, [volume]);
 
   const ensureAudioTrackEnabled = useCallback((preferred = preferredAudioIndex) => {
-    const v = videoRef.current as HTMLVideoElement & { audioTracks?: AudioTrackList };
+    const v = videoRef.current as VideoWithAudioTracks;
     if (!v?.audioTracks || v.audioTracks.length === 0) return;
 
     let enabledIdx = -1;
@@ -178,7 +180,7 @@ export default function VideoPlayer({
     setTextTracks(subs);
 
     const audios: AudioOption[] = [];
-    const at = (v as HTMLVideoElement & { audioTracks?: AudioTrackList }).audioTracks;
+    const at = (v as VideoWithAudioTracks).audioTracks;
     if (at && at.length > 0) {
       for (let i = 0; i < at.length; i++) {
         const t = at[i];
