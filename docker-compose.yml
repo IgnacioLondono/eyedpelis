@@ -1,0 +1,29 @@
+# Stack para Portainer — Eyedpelis
+services:
+  eyedpelis:
+    build: .
+    container_name: eyedpelis
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      - PORT=3001
+      - MEDIA_PATH=/media
+      - MOVIES_PATH=Peliculas
+      - SERIES_PATH=Series
+      - MEDIA_READ_ONLY=true
+      - TMDB_API_KEY=${TMDB_API_KEY:-}
+      - JWT_SECRET=${JWT_SECRET:-cambia-este-secreto-en-produccion}
+      - ADMIN_USER=${ADMIN_USER:-eyedpelis}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-Eyedpelis2026!}
+      - AUTH_ENABLED=${AUTH_ENABLED:-true}
+      - CLIENT_URL=${CLIENT_URL:-http://localhost:3001}
+    volumes:
+      - /srv/dev-disk-by-uuid-a5b4e34c-5e9b-430c-93ad-0473fe6143d2/data/Videos:/media:ro
+      - ./data:/app/server/data
+    networks:
+      - eyedpelis-net
+
+networks:
+  eyedpelis-net:
+    driver: bridge

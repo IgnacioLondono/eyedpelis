@@ -1,0 +1,79 @@
+export interface SubtitleTrack {
+  path: string;
+  label: string;
+  language: string;
+  format: string;
+}
+
+export interface MediaItem {
+  id: number;
+  tmdb_id: number | null;
+  type: 'movie' | 'series';
+  title: string;
+  original_title: string | null;
+  overview: string | null;
+  poster_path: string | null;
+  backdrop_path: string | null;
+  release_date: string | null;
+  vote_average: number | null;
+  genres: string | null;
+  file_path: string | null;
+  file_size: number | null;
+  season: number | null;
+  episode: number | null;
+  series_id: number | null;
+  status: string;
+  subtitles?: SubtitleTrack[];
+  episodes?: MediaItem[];
+  episodeCount?: number;
+}
+
+export interface SearchResult {
+  id: number;
+  type: 'movie' | 'series';
+  title: string;
+  original_title?: string;
+  overview: string;
+  poster_path: string | null;
+  backdrop_path: string | null;
+  release_date: string | null;
+  vote_average: number;
+}
+
+export interface DownloadItem {
+  id: number;
+  tmdb_id: number;
+  type: 'movie' | 'series';
+  title: string;
+  poster_path: string | null;
+  status: string;
+  progress: number;
+  size_bytes: number | null;
+  error_message: string | null;
+  created_at: string;
+}
+
+export interface LibraryStats {
+  totalMovies: number;
+  totalSeries: number;
+  totalEpisodes: number;
+  totalSize: number;
+  activeDownloads: number;
+}
+
+export interface Settings {
+  media_path: string;
+  movies_path: string;
+  series_path: string;
+  tmdb_api_key: string;
+  scan_interval: string;
+  auto_scan: boolean;
+  qbittorrent_url: string;
+  qbittorrent_user: string;
+  qbittorrent_pass: string;
+  jellyfin_url: string;
+  jellyfin_api_key: string;
+  plex_url: string;
+  plex_token: string;
+  auth_enabled: boolean;
+}

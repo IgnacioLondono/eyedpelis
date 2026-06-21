@@ -1,0 +1,60 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-surface text-white antialiased;
+    background-image: radial-gradient(ellipse at top, rgba(147, 51, 234, 0.08) 0%, transparent 50%);
+  }
+
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-surface;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-accent-muted rounded-full transition-colors duration-300;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-accent;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-accent hover:bg-accent-hover text-white font-semibold px-5 py-2.5 rounded-lg
+      transition-all duration-300 ease-out active:scale-95 shadow-purple hover:shadow-purple-lg hover:-translate-y-0.5;
+  }
+  .btn-secondary {
+    @apply bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/20 text-white font-medium px-5 py-2.5 rounded-lg
+      transition-all duration-300 ease-out hover:-translate-y-0.5 hover:border-purple-500/40;
+  }
+  .card-hover {
+    @apply transition-all duration-500 ease-out hover:scale-[1.04] hover:z-10 hover:shadow-purple;
+  }
+  .brand-text {
+    @apply bg-gradient-to-r from-accent-glow via-accent to-accent-muted bg-clip-text text-transparent;
+  }
+  .shimmer-bg {
+    background: linear-gradient(90deg, #0d0d0d 25%, #1a1a1a 50%, #0d0d0d 75%);
+    background-size: 200% 100%;
+    @apply animate-shimmer;
+  }
+  .nav-link {
+    @apply transition-all duration-300 ease-out;
+  }
+  .input-field {
+    @apply transition-all duration-300 ease-out focus:scale-[1.01] focus:shadow-purple;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

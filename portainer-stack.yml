@@ -1,0 +1,42 @@
+# ============================================================
+# EYEDPELIS — Stack para Portainer (OpenMediaVault)
+# ============================================================
+# 1. Portainer → Stacks → Add stack
+# 2. Nombre: eyedpelis
+# 3. Web editor → pegar TODO este archivo
+# 4. Editar TMDB_API_KEY y CLIENT_URL
+# 5. Deploy the stack
+# ============================================================
+
+services:
+  eyedpelis:
+    build:
+      context: /opt/eyedpelis
+      dockerfile: Dockerfile
+    container_name: eyedpelis
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      PORT: "3001"
+      MEDIA_PATH: "/media"
+      MOVIES_PATH: "Peliculas"
+      SERIES_PATH: "Series"
+      MEDIA_READ_ONLY: "true"
+      TMDB_API_KEY: "PEGA_TU_API_KEY_AQUI"
+      JWT_SECRET: "cambia-este-secreto-por-algo-largo-y-aleatorio"
+      ADMIN_USER: "eyedpelis"
+      ADMIN_PASSWORD: "Eyedpelis2026!"
+      AUTH_ENABLED: "true"
+      CLIENT_URL: "http://192.168.1.100:3001"
+    volumes:
+      # Tu carpeta Videos — SOLO LECTURA (no toca Peliculas ni Series)
+      - /srv/dev-disk-by-uuid-a5b4e34c-5e9b-430c-93ad-0473fe6143d2/data/Videos:/media:ro
+      # Datos de la app (separado de tus videos)
+      - /opt/eyedpelis/data:/app/server/data
+    networks:
+      - eyedpelis-net
+
+networks:
+  eyedpelis-net:
+    driver: bridge
