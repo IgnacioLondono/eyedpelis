@@ -84,9 +84,11 @@ function langLabel(code: string, fallback?: string): string {
   return LANG_LABELS[c] || fallback || code.toUpperCase();
 }
 
-function buildCompatUrl(base: string, audioIndex: number): string {
+function buildCompatUrl(base: string, audioIndex: number, startSec = 0): string {
   const sep = base.includes('?') ? '&' : '?';
-  return `${base}${sep}audio=${audioIndex}`;
+  let url = `${base}${sep}audio=${audioIndex}`;
+  if (startSec > 0.5) url += `&start=${startSec.toFixed(1)}`;
+  return url;
 }
 
 function TrackMenu({
@@ -150,13 +152,13 @@ function TrackMenu({
               <button
                 key={a.index}
                 type="button"
-                disabled={!canSwitchAudio && audioOptions.length > 1}
+                disabled={!canSwitchAudio && audioOptions.length > 1 && compatMode}
                 className={`w-full text-left px-4 py-3 text-sm flex items-center justify-between gap-3 transition-colors ${
-                  canSwitchAudio || audioOptions.length === 1
+                  canSwitchAudio || audioOptions.length === 1 || !compatMode
                     ? 'hover:bg-white/10 cursor-pointer'
                     : 'opacity-60 cursor-default'
                 } ${activeAudio === a.index ? 'text-accent-glow bg-white/5' : 'text-white/90'}`}
-                onClick={() => canSwitchAudio && onSelectAudio(a.index)}
+                onClick={() => (canSwitchAudio || !compatMode) && onSelectAudio(a.index)}
               >
                 <span>{a.label}</span>
                 {activeAudio === a.index && <span className="text-accent-glow text-xs font-bold">●</span>}
@@ -164,8 +166,8 @@ function TrackMenu({
             )) : (
               <p className="px-4 py-2 text-xs text-gray-500">Pista de audio principal</p>
             )}
-            {audioOptions.length > 1 && !canSwitchAudio && (
-              <p className="px-4 pb-2 text-[11px] text-gray-500">Usa «Activar audio» para cambiar de pista</p>
+            {needsAudioCompat && !compatMode && audioOptions.length > 1 && (
+              <p className="px-4 pb-2 text-[11px] text-gray-500">Elige un idioma para activar el audio</p>
             )}
           </div>
 
@@ -218,6 +220,8 @@ export default function VideoPlayer({
   const userMutedRef = useRef(false);
   const compatAttempted = useRef(false);
   const resumeTimeRef = useRef(0);
+  const isCompatSeeking = useRef(false);
+  const compatStartOffset = useRef(0);
 
   const [activeSrc, setActiveSrc] = useState(src);
   const [compatMode, setCompatMode] = useState(false);
@@ -263,7 +267,8 @@ export default function VideoPlayer({
     : subtitles.map(s => ({ index: s.index, label: s.label }));
 
   const canSwitchAudioBrowser = browserAudioTracks.length > 1;
-  const canSwitchAudio = canSwitchAudioBrowser;
+  const canSwitchAudioCompat = probeAudioOptions.length > 1 && !!compatSrc;
+  const canSwitchAudio = canSwitchAudioBrowser || canSwitchAudioCompat;
   const tracksActive = activeSub >= 0 || (audioOptions.length > 1 && activeAudio >= 0);
 
   const revealControls = useCallback(() => {
@@ -294,18 +299,37 @@ export default function VideoPlayer({
     return true;
   }, []);
 
-  const switchCompatAudio = useCallback((trackIndex: number) => {
-    if (!compatSrc || compatMode) return;
-    const v = videoRef.current;
-    resumeTimeRef.current = v?.currentTime ?? 0;
-    compatAttempted.current = true;
-    setCompatMode(true);
-    setActivatingAudio(true);
-    setActiveSrc(buildCompatUrl(compatSrc, trackIndex));
+  const reloadCompatStream = useCallback((trackIndex: number, startSec: number) => {
+    if (!compatSrc) return;
+    isCompatSeeking.current = startSec > 0.5;
+    compatStartOffset.current = startSec;
+    setCurrentTime(startSec);
     setActiveAudio(trackIndex);
+    setActivatingAudio(true);
     setBuffering(true);
     if (knownDuration) setDuration(knownDuration);
+
+    const url = buildCompatUrl(compatSrc, trackIndex, startSec);
+    setActiveSrc(url);
+
+    if (!compatMode) {
+      compatAttempted.current = true;
+      setCompatMode(true);
+    }
+
+    const v = videoRef.current;
+    if (v) {
+      v.src = url;
+      v.load();
+      v.play().catch(() => setError('No se pudo reproducir el video'));
+    }
   }, [compatSrc, compatMode, knownDuration]);
+
+  const switchCompatAudio = useCallback((trackIndex: number, startAt?: number) => {
+    const v = videoRef.current;
+    const t = startAt ?? v?.currentTime ?? currentTime;
+    reloadCompatStream(trackIndex, t);
+  }, [reloadCompatStream, currentTime]);
 
   const ensureAudioOutput = useCallback(() => {
     const v = videoRef.current;
@@ -379,8 +403,13 @@ export default function VideoPlayer({
   const seek = useCallback((time: number) => {
     const v = videoRef.current;
     if (!v || !duration) return;
-    v.currentTime = Math.max(0, Math.min(time, duration));
-  }, [duration]);
+    const t = Math.max(0, Math.min(time, duration));
+    if (compatMode && compatSrc) {
+      reloadCompatStream(activeAudio, t);
+      return;
+    }
+    v.currentTime = t;
+  }, [duration, compatMode, compatSrc, activeAudio, reloadCompatStream]);
 
   const seekRelative = useCallback((delta: number) => {
     seek(currentTime + delta);
@@ -434,9 +463,9 @@ export default function VideoPlayer({
   }, [switchCompatAudio, preferredAudioIndex]);
 
   const activateCompatibleAudio = useCallback(() => {
-    if (compatMode || !compatSrc) return;
-    switchCompatAudio(preferredAudioIndex);
-  }, [compatMode, compatSrc, switchCompatAudio, preferredAudioIndex]);
+    if (!compatSrc || compatMode) return;
+    switchCompatAudio(preferredAudioIndex, currentTime);
+  }, [compatMode, compatSrc, switchCompatAudio, preferredAudioIndex, currentTime]);
 
   const selectSubtitle = (trackIndex: number) => {
     if (trackIndex === -1) {
@@ -464,6 +493,9 @@ export default function VideoPlayer({
       setShowLangMenu(false);
       return;
     }
+    if (compatSrc && (needsAudioCompat || compatMode)) {
+      switchCompatAudio(trackIndex);
+    }
     setShowLangMenu(false);
   };
 
@@ -484,6 +516,7 @@ export default function VideoPlayer({
     setCompatMode(false);
     setActivatingAudio(false);
     compatAttempted.current = false;
+    compatStartOffset.current = 0;
     if (knownDuration) setDuration(knownDuration);
   }, [src, preferredAudioIndex, knownDuration]);
 
@@ -567,7 +600,6 @@ export default function VideoPlayer({
     >
       <video
         ref={videoRef}
-        key={activeSrc}
         src={activeSrc}
         poster={poster}
         className="w-full h-full object-contain"
@@ -582,11 +614,17 @@ export default function VideoPlayer({
         onTimeUpdate={() => {
           const v = videoRef.current;
           if (!v) return;
-          setCurrentTime(v.currentTime);
+          const t = compatMode
+            ? compatStartOffset.current + v.currentTime
+            : v.currentTime;
+          setCurrentTime(t);
           if (v.buffered.length > 0) {
-            setBuffered(v.buffered.end(v.buffered.length - 1));
+            const bufEnd = compatMode
+              ? compatStartOffset.current + v.buffered.end(v.buffered.length - 1)
+              : v.buffered.end(v.buffered.length - 1);
+            setBuffered(bufEnd);
           }
-          if (knownDuration && v.duration > 0 && v.duration < knownDuration * 0.5) {
+          if (knownDuration && !compatMode && v.duration > 0 && v.duration < knownDuration * 0.5) {
             setDuration(knownDuration);
           }
         }}
@@ -594,7 +632,9 @@ export default function VideoPlayer({
           const v = videoRef.current;
           if (v) {
             setDuration(resolveDuration(v.duration, knownDuration, v.currentTime));
-            if (resumeTimeRef.current > 0) {
+            if (isCompatSeeking.current) {
+              isCompatSeeking.current = false;
+            } else if (resumeTimeRef.current > 0) {
               v.currentTime = resumeTimeRef.current;
               resumeTimeRef.current = 0;
             }

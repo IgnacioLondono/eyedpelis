@@ -90,6 +90,7 @@ router.get('/:id/compat', async (req, res) => {
   const audioIdx = Number.isFinite(parseInt(req.query.audio as string, 10))
     ? parseInt(req.query.audio as string, 10)
     : (probe?.recommendedAudioIndex ?? 0);
+  const startSec = Math.max(0, parseFloat(req.query.start as string) || 0);
 
   res.setHeader('Content-Type', 'video/mp4');
   res.setHeader('Transfer-Encoding', 'chunked');
@@ -97,6 +98,7 @@ router.get('/:id/compat', async (req, res) => {
 
   const args = [
     '-hide_banner', '-loglevel', 'error',
+    ...(startSec > 0 ? ['-ss', startSec.toFixed(2)] : []),
     '-i', item.file_path,
     '-map', '0:v:0?',
     '-map', `0:a:${audioIdx}?`,
