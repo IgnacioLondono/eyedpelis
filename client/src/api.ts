@@ -116,6 +116,10 @@ export const api = {
     const token = authToken ? `?token=${authToken}` : '';
     return `${API}/stream/${id}/compat${token}`;
   },
+  compatAudioUrl: (id: number) => {
+    const token = authToken ? `?token=${authToken}` : '';
+    return `${API}/stream/${id}/compat-audio${token}`;
+  },
   getStreamInfo: (id: number) =>
     request<{
       subtitles: Array<{ index?: number; label: string; language: string; embedded?: boolean }>;

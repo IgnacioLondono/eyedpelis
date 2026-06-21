@@ -83,6 +83,7 @@ export default function Player() {
     <VideoPlayer
       src={api.streamUrl(media.id)}
       compatSrc={api.compatStreamUrl(media.id)}
+      compatAudioSrc={api.compatAudioUrl(media.id)}
       title={title}
       poster={posterUrl(media.poster_path ?? null)}
       subtitles={subtitles}

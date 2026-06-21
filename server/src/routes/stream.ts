@@ -8,20 +8,30 @@ import { probeMedia, codecLabel } from '../services/mediaProbe.js';
 
 const router = Router();
 
-/** Seek en dos fases: salto rápido a keyframe + ajuste fino preciso → A/V sincronizados. */
-const SEEK_CHUNK_SEC = 30;
-
-function buildSeekInputArgs(filePath: string, startSec: number): string[] {
+/** Seek rápido (solo antes del input) — suficiente cuando el vídeo va por separado. */
+function buildFastSeekArgs(filePath: string, startSec: number): string[] {
   if (startSec <= 0.5) return ['-i', filePath];
+  return ['-ss', startSec.toFixed(2), '-i', filePath];
+}
 
-  const coarse = Math.floor(startSec / SEEK_CHUNK_SEC) * SEEK_CHUNK_SEC;
-  const fine = startSec - coarse;
+function resolveAudioMap(probe: Awaited<ReturnType<typeof probeMedia>>, audioIdx: number): string {
+  const audioTrack = probe?.audioTracks[audioIdx];
+  return audioTrack?.streamIndex != null ? `0:${audioTrack.streamIndex}` : `0:a:${audioIdx}?`;
+}
 
-  if (coarse > 0 && fine > 0.05) {
-    return ['-ss', coarse.toFixed(2), '-i', filePath, '-ss', fine.toFixed(3)];
-  }
-  if (coarse > 0) return ['-ss', coarse.toFixed(2), '-i', filePath];
-  return ['-i', filePath, '-ss', fine.toFixed(3)];
+function pipeFfmpeg(req: import('express').Request, res: import('express').Response, args: string[], label: string) {
+  const ffmpeg = spawn('ffmpeg', args);
+  ffmpeg.on('error', () => {
+    if (!res.headersSent) res.status(500).json({ error: 'ffmpeg no disponible' });
+    else res.end();
+  });
+  ffmpeg.stderr.on('data', (chunk: Buffer) => {
+    console.error(`[ffmpeg ${label}]`, chunk.toString().trim());
+  });
+  ffmpeg.stdout.pipe(res);
+  const cleanup = () => ffmpeg.kill('SIGKILL');
+  req.on('close', cleanup);
+  res.on('close', cleanup);
 }
 
 async function syncSubtitles(item: NonNullable<ReturnType<typeof getMediaById>>) {
@@ -97,6 +107,35 @@ router.get('/:id/info', async (req, res) => {
   });
 });
 
+router.get('/:id/compat-audio', async (req, res) => {
+  const item = getMediaById(parseInt(req.params.id));
+  if (!item?.file_path || !fs.existsSync(item.file_path)) {
+    return res.status(404).json({ error: 'Archivo no encontrado' });
+  }
+
+  const probe = await probeMedia(item.file_path);
+  const audioIdx = Number.isFinite(parseInt(req.query.audio as string, 10))
+    ? parseInt(req.query.audio as string, 10)
+    : (probe?.recommendedAudioIndex ?? 0);
+  const startSec = Math.max(0, parseFloat(req.query.start as string) || 0);
+  const audioMap = resolveAudioMap(probe, audioIdx);
+
+  res.setHeader('Content-Type', 'audio/mp4');
+  res.setHeader('Transfer-Encoding', 'chunked');
+  res.setHeader('Cache-Control', 'no-store');
+
+  pipeFfmpeg(req, res, [
+    '-hide_banner', '-loglevel', 'error',
+    ...buildFastSeekArgs(item.file_path, startSec),
+    '-map', audioMap,
+    '-vn',
+    '-c:a', 'aac', '-b:a', '192k', '-ac', '2', '-ar', '48000',
+    '-f', 'mp4',
+    '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
+    'pipe:1',
+  ], 'compat-audio');
+});
+
 router.get('/:id/compat', async (req, res) => {
   const item = getMediaById(parseInt(req.params.id));
   if (!item?.file_path || !fs.existsSync(item.file_path)) {
@@ -108,49 +147,25 @@ router.get('/:id/compat', async (req, res) => {
     ? parseInt(req.query.audio as string, 10)
     : (probe?.recommendedAudioIndex ?? 0);
   const startSec = Math.max(0, parseFloat(req.query.start as string) || 0);
-
-  const audioTrack = probe?.audioTracks[audioIdx];
-  const audioMap = audioTrack?.streamIndex != null
-    ? `0:${audioTrack.streamIndex}`
-    : `0:a:${audioIdx}?`;
+  const audioMap = resolveAudioMap(probe, audioIdx);
 
   res.setHeader('Content-Type', 'video/mp4');
   res.setHeader('Transfer-Encoding', 'chunked');
   res.setHeader('Cache-Control', 'no-store');
-  res.setHeader('X-Playback-Offset', startSec.toFixed(3));
 
-  const args = [
+  pipeFfmpeg(req, res, [
     '-hide_banner', '-loglevel', 'error',
-    ...buildSeekInputArgs(item.file_path, startSec),
+    ...buildFastSeekArgs(item.file_path, startSec),
     '-map', '0:v:0?',
     '-map', audioMap,
     '-c:v', 'copy',
     '-c:a', 'aac', '-b:a', '192k', '-ac', '2', '-ar', '48000',
-    '-af', 'aresample=async=1:first_pts=0',
     '-fflags', '+genpts',
     '-reset_timestamps', '1',
-    '-max_interleave_delta', '0',
     '-f', 'mp4',
     '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
     'pipe:1',
-  ];
-
-  const ffmpeg = spawn('ffmpeg', args);
-
-  ffmpeg.on('error', () => {
-    if (!res.headersSent) res.status(500).json({ error: 'ffmpeg no disponible' });
-    else res.end();
-  });
-
-  ffmpeg.stderr.on('data', (chunk: Buffer) => {
-    console.error('[ffmpeg compat]', chunk.toString().trim());
-  });
-
-  ffmpeg.stdout.pipe(res);
-
-  const cleanup = () => ffmpeg.kill('SIGKILL');
-  req.on('close', cleanup);
-  res.on('close', cleanup);
+  ], 'compat');
 });
 
 router.get('/:id', (req, res) => {

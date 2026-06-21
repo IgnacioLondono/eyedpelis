@@ -6,8 +6,6 @@ import {
 import { findActiveCue, parseVtt, type VttCue } from '../utils/vttParser';
 import { getAuthToken } from '../api';
 
-/* ─── Tipos ─── */
-
 interface SubtitleOption {
   index: number;
   label: string;
@@ -24,6 +22,7 @@ interface AudioOption {
 interface Props {
   src: string;
   compatSrc?: string;
+  compatAudioSrc?: string;
   title: string;
   subtitles?: SubtitleOption[];
   probeAudioTracks?: Array<{ index: number; language: string; codecLabel?: string }>;
@@ -34,17 +33,16 @@ interface Props {
   preferredAudioIndex?: number;
 }
 
-type Engine = 'direct' | 'transcode';
+type Engine = 'direct' | 'split' | 'transcode';
 
 interface Playback {
   engine: Engine;
-  src: string;
+  videoSrc: string;
+  audioSrc?: string;
+  muxSrc?: string;
   audioIndex: number;
-  /** Tiempo absoluto del archivo donde empieza el segmento actual (solo transcode). */
   offset: number;
 }
-
-/* ─── Utilidades ─── */
 
 const LANG: Record<string, string> = {
   es: 'Español', spa: 'Español', esp: 'Español',
@@ -70,7 +68,7 @@ function formatTime(s: number): string {
   return `${m}:${String(sec).padStart(2, '0')}`;
 }
 
-function transcodeUrl(base: string, audio: number, startSec: number, gen: number): string {
+function buildStreamUrl(base: string, audio: number, startSec: number, gen: number): string {
   const sep = base.includes('?') ? '&' : '?';
   let url = `${base}${sep}audio=${audio}&_g=${gen}`;
   if (startSec > 0.5) url += `&start=${startSec.toFixed(2)}`;
@@ -78,22 +76,26 @@ function transcodeUrl(base: string, audio: number, startSec: number, gen: number
 }
 
 function initialPlayback(
-  src: string,
-  compatSrc: string | undefined,
+  videoSrc: string,
+  compatAudioSrc: string | undefined,
   needsCompat: boolean,
   audioIndex: number,
 ): Playback {
-  if (needsCompat && compatSrc) {
-    return { engine: 'transcode', src: transcodeUrl(compatSrc, audioIndex, 0, 0), audioIndex, offset: 0 };
+  if (needsCompat && compatAudioSrc) {
+    return {
+      engine: 'split',
+      videoSrc,
+      audioSrc: buildStreamUrl(compatAudioSrc, audioIndex, 0, 0),
+      audioIndex,
+      offset: 0,
+    };
   }
-  return { engine: 'direct', src, audioIndex, offset: 0 };
+  return { engine: 'direct', videoSrc, audioIndex, offset: 0 };
 }
 
-async function tryPlay(v: HTMLVideoElement) {
-  try { await v.play(); } catch { /* autoplay bloqueado */ }
+async function tryPlay(el: HTMLMediaElement) {
+  try { await el.play(); } catch { /* ignore */ }
 }
-
-/* ─── Menú de pistas ─── */
 
 function TrackMenu({ open, onClose, audioOptions, subtitleOptions, activeAudio, activeSub, onAudio, onSub }: {
   open: boolean;
@@ -117,13 +119,13 @@ function TrackMenu({ open, onClose, audioOptions, subtitleOptions, activeAudio, 
         <div className="max-h-[50vh] overflow-y-auto">
           <div className="py-2 border-b border-white/10">
             <p className="px-4 py-1.5 text-[11px] font-semibold text-gray-400 uppercase tracking-widest">Audio</p>
-            {audioOptions.length > 0 ? audioOptions.map(a => (
+            {audioOptions.map(a => (
               <button key={a.index} type="button" onClick={() => onAudio(a.index)}
                 className={`w-full text-left px-4 py-3 text-sm hover:bg-white/10 flex items-center justify-between ${activeAudio === a.index ? 'text-accent-glow bg-white/5' : 'text-white/90'}`}>
                 <span>{a.label}</span>
                 {activeAudio === a.index && <span className="text-accent-glow text-xs font-bold">●</span>}
               </button>
-            )) : <p className="px-4 py-2 text-xs text-gray-500">Pista principal</p>}
+            ))}
           </div>
           <div className="py-2">
             <p className="px-4 py-1.5 text-[11px] font-semibold text-gray-400 uppercase tracking-widest flex items-center gap-1.5">
@@ -149,17 +151,16 @@ function TrackMenu({ open, onClose, audioOptions, subtitleOptions, activeAudio, 
   );
 }
 
-/* ─── Reproductor ─── */
-
 export default function VideoPlayer({
-  src, compatSrc, title, subtitles = [], probeAudioTracks = [], onBack, poster,
+  src, compatSrc, compatAudioSrc, title, subtitles = [], probeAudioTracks = [], onBack, poster,
   knownDuration = null, needsAudioCompat = false, preferredAudioIndex = 0,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
   const progressRef = useRef<HTMLDivElement>(null);
   const hideTimer = useRef<ReturnType<typeof setTimeout>>();
-  const seekTimer = useRef<ReturnType<typeof setTimeout>>();
+  const audioSeekTimer = useRef<ReturnType<typeof setTimeout>>();
   const subsInit = useRef(false);
   const cuesCache = useRef(new Map<number, VttCue[]>());
   const timeRef = useRef(0);
@@ -167,9 +168,10 @@ export default function VideoPlayer({
   const cuesRef = useRef<VttCue[]>([]);
   const activeSubRef = useRef(-1);
   const streamGenRef = useRef(0);
+  const audioAnchorRef = useRef(0);
 
   const [playback, setPlayback] = useState<Playback>(() =>
-    initialPlayback(src, compatSrc, needsAudioCompat, preferredAudioIndex),
+    initialPlayback(src, compatAudioSrc, needsAudioCompat, preferredAudioIndex),
   );
   const [playing, setPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -183,7 +185,7 @@ export default function VideoPlayer({
   const [fullscreen, setFullscreen] = useState(false);
   const [showControls, setShowControls] = useState(true);
   const [buffering, setBuffering] = useState(true);
-  const [preparing, setPreparing] = useState(false);
+  const [syncingAudio, setSyncingAudio] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showLangMenu, setShowLangMenu] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -194,26 +196,49 @@ export default function VideoPlayer({
   const [loadingSubs, setLoadingSubs] = useState(false);
   const [subError, setSubError] = useState<string | null>(null);
 
+  const isSplit = playback.engine === 'split';
+  const isTranscode = playback.engine === 'transcode';
+  const videoSrc = isTranscode ? playback.muxSrc! : playback.videoSrc;
+
   const audioOptions = useMemo(() =>
     probeAudioTracks.map(t => ({ index: t.index, label: langLabel(t.language), language: t.language })),
   [probeAudioTracks]);
 
   const subtitleOptions = subtitles.map(s => ({ index: s.index, label: s.label }));
-  const isTranscode = playback.engine === 'transcode';
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
   const bufPct = duration > 0 ? (buffered / duration) * 100 : 0;
 
-  /* ── Cambiar motor de reproducción ── */
+  const syncAudioElement = useCallback(() => {
+    const v = videoRef.current;
+    const a = audioRef.current;
+    if (!v || !a || playbackRef.current?.engine !== 'split') return;
+    const target = Math.max(0, v.currentTime - audioAnchorRef.current);
+    if (Math.abs(a.currentTime - target) > 0.15) a.currentTime = target;
+    if (!v.paused && a.paused) tryPlay(a);
+  }, []);
+
+  const reloadAudio = useCallback((atSec: number, audioIndex: number) => {
+    if (!compatAudioSrc) return;
+    streamGenRef.current += 1;
+    audioAnchorRef.current = atSec;
+    setSyncingAudio(true);
+    const audioSrc = buildStreamUrl(compatAudioSrc, audioIndex, atSec, streamGenRef.current);
+    setPlayback(p => {
+      const next = { ...p, engine: 'split' as const, videoSrc: src, audioSrc, audioIndex, offset: 0 };
+      playbackRef.current = next;
+      return next;
+    });
+  }, [compatAudioSrc, src]);
 
   const goTranscode = useCallback((audioIndex: number, atSec: number) => {
     if (!compatSrc) return;
     streamGenRef.current += 1;
-    setPreparing(true);
     setBuffering(true);
     setError(null);
     const next: Playback = {
       engine: 'transcode',
-      src: transcodeUrl(compatSrc, audioIndex, atSec, streamGenRef.current),
+      videoSrc: src,
+      muxSrc: buildStreamUrl(compatSrc, audioIndex, atSec, streamGenRef.current),
       audioIndex,
       offset: atSec,
     };
@@ -221,24 +246,29 @@ export default function VideoPlayer({
     setPlayback(next);
     setCurrentTime(atSec);
     timeRef.current = atSec;
-  }, [compatSrc]);
-
-  const absoluteTime = useCallback(() => timeRef.current, []);
+  }, [compatSrc, src]);
 
   const seekTo = useCallback((time: number) => {
     const t = Math.max(0, Math.min(time, duration || time));
+    const v = videoRef.current;
+    if (!v) return;
+
     if (isTranscode && compatSrc) {
       setCurrentTime(t);
-      if (seekTimer.current) clearTimeout(seekTimer.current);
-      seekTimer.current = setTimeout(() => goTranscode(playback.audioIndex, t), 400);
+      if (audioSeekTimer.current) clearTimeout(audioSeekTimer.current);
+      audioSeekTimer.current = setTimeout(() => goTranscode(playback.audioIndex, t), 300);
       return;
     }
-    const v = videoRef.current;
-    if (v) v.currentTime = t;
-    setCurrentTime(t);
-  }, [duration, isTranscode, compatSrc, playback.audioIndex, goTranscode]);
 
-  /* ── Subtítulos ── */
+    v.currentTime = t;
+    timeRef.current = t;
+    setCurrentTime(t);
+
+    if (isSplit && compatAudioSrc) {
+      if (audioSeekTimer.current) clearTimeout(audioSeekTimer.current);
+      audioSeekTimer.current = setTimeout(() => reloadAudio(t, playback.audioIndex), 200);
+    }
+  }, [duration, isTranscode, isSplit, compatSrc, compatAudioSrc, playback.audioIndex, goTranscode, reloadAudio]);
 
   const loadSubs = useCallback(async (idx: number) => {
     const sub = subtitles.find(s => s.index === idx);
@@ -291,15 +321,12 @@ export default function VideoPlayer({
 
   const selectAudio = (idx: number) => {
     if (idx === playback.audioIndex) { setShowLangMenu(false); return; }
-    if (isTranscode || needsAudioCompat) {
-      goTranscode(idx, absoluteTime());
-    } else {
-      setPlayback(p => ({ ...p, audioIndex: idx }));
-    }
+    const t = timeRef.current;
+    if (isSplit && compatAudioSrc) reloadAudio(t, idx);
+    else if (isTranscode || needsAudioCompat) goTranscode(idx, t);
+    else setPlayback(p => ({ ...p, audioIndex: idx }));
     setShowLangMenu(false);
   };
-
-  /* ── Controles ── */
 
   const reveal = useCallback(() => {
     setShowControls(true);
@@ -309,23 +336,23 @@ export default function VideoPlayer({
 
   const togglePlay = useCallback(() => {
     const v = videoRef.current;
+    const a = audioRef.current;
     if (!v) return;
-    v.paused ? tryPlay(v) : v.pause();
-  }, []);
+    if (v.paused) {
+      tryPlay(v);
+      if (a && isSplit) tryPlay(a);
+    } else {
+      v.pause();
+      a?.pause();
+    }
+  }, [isSplit]);
 
   const toggleMute = useCallback(() => {
-    const v = videoRef.current;
-    if (!v) return;
-    v.muted = !v.muted;
-    setMuted(v.muted);
+    setMuted(m => !m);
   }, []);
 
   const changeVol = (val: number) => {
-    const v = videoRef.current;
-    if (!v) return;
     const c = Math.max(0, Math.min(1, val));
-    v.volume = c;
-    v.muted = c === 0;
     setVolume(c);
     setMuted(c === 0);
     localStorage.setItem('eyedpelis_volume', String(c));
@@ -341,13 +368,11 @@ export default function VideoPlayer({
 
   const btn = 'p-2.5 rounded-xl hover:bg-white/15 active:bg-white/20 transition-all hover:scale-105 active:scale-95';
 
-  /* ── Efectos ── */
-
-  // Reset al cambiar de película
   useEffect(() => {
     subsInit.current = false;
     cuesCache.current.clear();
     streamGenRef.current = 0;
+    audioAnchorRef.current = 0;
     activeSubRef.current = -1;
     setActiveSub(-1);
     setSubtitleCues([]);
@@ -355,18 +380,16 @@ export default function VideoPlayer({
     setActiveCue(null);
     setSubError(null);
     setError(null);
-    const pb = initialPlayback(src, compatSrc, needsAudioCompat, preferredAudioIndex);
+    const pb = initialPlayback(src, compatAudioSrc, needsAudioCompat, preferredAudioIndex);
     playbackRef.current = pb;
     setPlayback(pb);
     if (knownDuration) setDuration(knownDuration);
-  }, [src, compatSrc, needsAudioCompat, preferredAudioIndex, knownDuration]);
+  }, [src, compatAudioSrc, needsAudioCompat, preferredAudioIndex, knownDuration]);
 
-  // Cargar subtítulos al activar pista
   useEffect(() => {
     if (activeSub >= 0) loadSubs(activeSub);
   }, [activeSub, loadSubs]);
 
-  // Subtítulos por defecto (español)
   useEffect(() => {
     if (subsInit.current || subtitles.length === 0) return;
     subsInit.current = true;
@@ -378,7 +401,6 @@ export default function VideoPlayer({
     if (es) selectSub(es.index);
   }, [subtitles]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Sincronizar subtítulos con el fotograma del vídeo (más preciso que timeupdate)
   useEffect(() => {
     let frame = 0;
     const tick = () => {
@@ -400,13 +422,27 @@ export default function VideoPlayer({
   useEffect(() => { activeSubRef.current = activeSub; }, [activeSub]);
   useEffect(() => { cuesRef.current = subtitleCues; }, [subtitleCues]);
 
-  // Volumen / velocidad
   useEffect(() => {
     const v = videoRef.current;
-    if (v) { v.volume = volume; v.playbackRate = playbackRate; v.muted = muted; }
-  }, [volume, playbackRate, muted]);
+    const a = audioRef.current;
+    if (v) {
+      v.playbackRate = playbackRate;
+      v.muted = isSplit || isTranscode || muted;
+      if (!isSplit) { v.volume = volume; v.muted = muted; }
+    }
+    if (a) {
+      a.volume = volume;
+      a.muted = muted;
+      a.playbackRate = playbackRate;
+    }
+  }, [volume, playbackRate, muted, isSplit, isTranscode]);
 
-  // Teclado
+  useEffect(() => {
+    if (!isSplit) return;
+    const id = window.setInterval(syncAudioElement, 1500);
+    return () => clearInterval(id);
+  }, [isSplit, syncAudioElement]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement) return;
@@ -435,10 +471,8 @@ export default function VideoPlayer({
 
   useEffect(() => () => {
     if (hideTimer.current) clearTimeout(hideTimer.current);
-    if (seekTimer.current) clearTimeout(seekTimer.current);
+    if (audioSeekTimer.current) clearTimeout(audioSeekTimer.current);
   }, []);
-
-  /* ── Render ── */
 
   return (
     <div ref={containerRef} className="relative w-full h-screen bg-black overflow-hidden select-none"
@@ -446,27 +480,28 @@ export default function VideoPlayer({
       onClick={e => { if (!(e.target as HTMLElement).closest('[data-controls]')) { togglePlay(); reveal(); } }}>
 
       <video
-        key={playback.src}
+        key={isTranscode ? playback.muxSrc : 'direct-video'}
         ref={videoRef}
-        src={playback.src}
+        src={videoSrc}
         poster={poster}
         className="w-full h-full object-contain"
         playsInline
         autoPlay
-        onPlay={() => { setPlaying(true); setBuffering(false); setPreparing(false); }}
-        onPause={() => { setPlaying(false); setShowControls(true); }}
-        onWaiting={() => setBuffering(true)}
-        onCanPlay={() => { setBuffering(false); setPreparing(false); tryPlay(videoRef.current!); }}
+        muted={isSplit || isTranscode || muted}
+        onPlay={() => { setPlaying(true); setBuffering(false); if (isSplit) syncAudioElement(); }}
+        onPause={() => { setPlaying(false); setShowControls(true); audioRef.current?.pause(); }}
+        onWaiting={() => { if (!syncingAudio) setBuffering(true); }}
+        onCanPlay={() => { setBuffering(false); tryPlay(videoRef.current!); }}
         onTimeUpdate={() => {
           const v = videoRef.current;
           if (!v) return;
           const pb = playbackRef.current;
-          const abs = pb?.engine === 'transcode' ? (pb.offset + v.currentTime) : v.currentTime;
+          const abs = pb?.engine === 'transcode' ? pb.offset + v.currentTime : v.currentTime;
           timeRef.current = abs;
           setCurrentTime(abs);
           if (v.buffered.length > 0) {
             const end = v.buffered.end(v.buffered.length - 1);
-            setBuffered(pb?.engine === 'transcode' ? (pb!.offset + end) : end);
+            setBuffered(pb?.engine === 'transcode' ? pb.offset + end : end);
           }
           if (knownDuration && knownDuration > 0) setDuration(knownDuration);
         }}
@@ -475,7 +510,12 @@ export default function VideoPlayer({
           else if (videoRef.current) setDuration(videoRef.current.duration || 0);
         }}
         onError={() => {
-          if (playback.engine === 'direct' && compatSrc && needsAudioCompat) {
+          const pb = playbackRef.current;
+          if (pb?.engine === 'split' && compatSrc) {
+            goTranscode(pb.audioIndex, timeRef.current);
+            return;
+          }
+          if (pb?.engine === 'direct' && compatSrc && needsAudioCompat) {
             goTranscode(preferredAudioIndex, 0);
             return;
           }
@@ -483,7 +523,24 @@ export default function VideoPlayer({
         }}
       />
 
-      {/* Subtítulos */}
+      {isSplit && playback.audioSrc && (
+        <audio
+          key={playback.audioSrc}
+          ref={audioRef}
+          src={playback.audioSrc}
+          className="hidden"
+          autoPlay
+          onCanPlay={() => {
+            setSyncingAudio(false);
+            syncAudioElement();
+            const v = videoRef.current;
+            if (v && !v.paused) tryPlay(audioRef.current!);
+          }}
+          onWaiting={() => setSyncingAudio(true)}
+          onError={() => setSyncingAudio(false)}
+        />
+      )}
+
       {activeCue && (
         <div className="absolute bottom-28 md:bottom-32 left-0 right-0 z-[25] flex justify-center px-4 pointer-events-none">
           <p className="text-center text-white text-base md:text-xl font-medium leading-relaxed max-w-4xl bg-black/85 px-4 py-2.5 rounded-xl shadow-2xl whitespace-pre-line border border-white/10">
@@ -498,13 +555,13 @@ export default function VideoPlayer({
         <div className="absolute bottom-28 left-1/2 -translate-x-1/2 z-[25] text-xs text-amber-400 bg-black/70 px-3 py-1 rounded-lg">{subError}</div>
       )}
 
-      {preparing && !error && (
+      {syncingAudio && !error && (
         <div className="absolute top-20 left-1/2 -translate-x-1/2 z-30 px-3 py-1.5 bg-black/70 backdrop-blur-sm rounded-lg text-white/70 text-xs">
-          Preparando stream…
+          Sincronizando audio…
         </div>
       )}
 
-      {buffering && !error && (
+      {buffering && !syncingAudio && !error && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           <div className="bg-black/40 backdrop-blur-sm rounded-full p-4">
             <Loader2 size={44} className="text-white animate-spin" />
@@ -515,24 +572,15 @@ export default function VideoPlayer({
       {error && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-black/90 z-30">
           <p className="text-red-400">{error}</p>
-          <div className="flex gap-3">
-            {compatSrc && playback.engine === 'direct' && (
-              <button type="button" onClick={() => goTranscode(preferredAudioIndex, 0)} className="btn-primary">
-                Reproducir con audio compatible
-              </button>
-            )}
-            <button type="button" onClick={onBack} className="btn-secondary">Volver</button>
-          </div>
+          <button type="button" onClick={onBack} className="btn-secondary">Volver</button>
         </div>
       )}
 
-      {/* Gradientes */}
       <div className={`absolute inset-0 pointer-events-none transition-opacity duration-500 ${showControls ? 'opacity-100' : 'opacity-0'}`}>
         <div className="absolute inset-x-0 top-0 h-28 bg-gradient-to-b from-black/90 to-transparent" />
         <div className="absolute inset-x-0 bottom-0 h-48 bg-gradient-to-t from-black via-black/80 to-transparent" />
       </div>
 
-      {/* Barra superior */}
       <div data-controls className={`absolute top-0 inset-x-0 z-20 flex items-center gap-3 px-5 md:px-8 py-5 transition-all duration-500 ${showControls ? 'opacity-100' : 'opacity-0 -translate-y-4 pointer-events-none'}`}>
         <button type="button" onClick={e => { e.stopPropagation(); onBack(); }} className={`${btn} bg-black/30 backdrop-blur-sm`} aria-label="Volver">
           <ArrowLeft size={22} />
@@ -550,7 +598,6 @@ export default function VideoPlayer({
         </div>
       )}
 
-      {/* Controles inferiores */}
       <div data-controls className={`absolute bottom-0 inset-x-0 z-20 transition-all duration-500 ${showControls ? 'opacity-100' : 'opacity-0 translate-y-6 pointer-events-none'}`} onClick={e => e.stopPropagation()}>
         <div className="px-4 md:px-8 pb-6 pt-2">
           <div ref={progressRef} className="group relative h-1 mb-5 cursor-pointer rounded-full bg-white/15 hover:h-1.5 transition-all"
