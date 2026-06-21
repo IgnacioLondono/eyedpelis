@@ -112,6 +112,19 @@ export const api = {
     const token = authToken ? `?token=${authToken}` : '';
     return `${API}/stream/${id}${token}`;
   },
+  compatStreamUrl: (id: number) => {
+    const token = authToken ? `?token=${authToken}` : '';
+    return `${API}/stream/${id}/compat${token}`;
+  },
+  getStreamInfo: (id: number) =>
+    request<{
+      probe: {
+        browserFriendlyAudio: boolean;
+        recommendedAudioIndex: number;
+        audioTracks: Array<{ index: number; codec: string; codecLabel: string; language: string }>;
+        videoCodecLabel: string | null;
+      } | null;
+    }>(`/stream/${id}/info`),
   subtitleUrl: (mediaId: number, index: number) => {
     const token = authToken ? `?token=${authToken}` : '';
     return `${API}/stream/${mediaId}/subtitle/${index}${token}`;

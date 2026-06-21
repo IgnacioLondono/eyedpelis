@@ -9,11 +9,33 @@ export default function Player() {
   const navigate = useNavigate();
   const [media, setMedia] = useState<MediaItem | null>(null);
   const [episodeTitle, setEpisodeTitle] = useState<string | null>(null);
+  const [useCompat, setUseCompat] = useState(false);
+  const [audioWarning, setAudioWarning] = useState<string | null>(null);
+  const [preferredAudioIndex, setPreferredAudioIndex] = useState(0);
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
     if (!id) return;
-    api.getMedia(parseInt(id)).then(async (item) => {
+    const numId = parseInt(id);
+
+    Promise.all([
+      api.getMedia(numId),
+      api.getStreamInfo(numId).catch(() => null),
+    ]).then(async ([item, streamInfo]) => {
       setMedia(item);
+
+      if (streamInfo?.probe) {
+        setPreferredAudioIndex(streamInfo.probe.recommendedAudioIndex);
+        if (!streamInfo.probe.browserFriendlyAudio) {
+          setUseCompat(true);
+          const codecs = streamInfo.probe.audioTracks.map(t => t.codecLabel).join(', ');
+          setAudioWarning(
+            codecs
+              ? `Audio ${codecs} no compatible con el navegador. Convirtiendo a AAC…`
+              : 'Audio no compatible con el navegador. Convirtiendo a AAC…',
+          );
+        }
+      }
 
       if (item.series_id && item.season != null && item.episode != null) {
         try {
@@ -26,10 +48,12 @@ export default function Player() {
           }
         } catch { /* usar título local */ }
       }
+
+      setReady(true);
     }).catch(console.error);
   }, [id]);
 
-  if (!media) {
+  if (!media || !ready) {
     return (
       <div className="flex items-center justify-center h-screen bg-black">
         <div className="animate-pulse text-gray-400">Cargando reproductor...</div>
@@ -55,9 +79,13 @@ export default function Player() {
   return (
     <VideoPlayer
       src={api.streamUrl(media.id)}
+      compatSrc={api.compatStreamUrl(media.id)}
       title={title}
       poster={posterUrl(media.poster_path ?? null)}
       subtitles={subtitles}
+      useCompat={useCompat}
+      audioWarning={audioWarning}
+      preferredAudioIndex={preferredAudioIndex}
       onBack={() => navigate(-1)}
     />
   );

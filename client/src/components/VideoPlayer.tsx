@@ -17,12 +17,27 @@ interface AudioOption {
   language: string;
 }
 
+interface BrowserAudioTrack {
+  enabled: boolean;
+  label: string;
+  language: string;
+}
+
+interface AudioTrackList {
+  length: number;
+  [index: number]: BrowserAudioTrack;
+}
+
 interface Props {
   src: string;
+  compatSrc?: string;
   title: string;
   subtitles?: SubtitleOption[];
   onBack: () => void;
   poster?: string;
+  useCompat?: boolean;
+  audioWarning?: string | null;
+  preferredAudioIndex?: number;
 }
 
 function formatTime(seconds: number): string {
@@ -50,12 +65,21 @@ function langLabel(code: string, fallback?: string): string {
   return LANG_LABELS[c] || fallback || code.toUpperCase();
 }
 
-export default function VideoPlayer({ src, title, subtitles = [], onBack, poster }: Props) {
+export default function VideoPlayer({
+  src, compatSrc, title, subtitles = [], onBack, poster,
+  useCompat = false, audioWarning = null, preferredAudioIndex = 0,
+}: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const progressRef = useRef<HTMLDivElement>(null);
   const hideTimer = useRef<ReturnType<typeof setTimeout>>();
   const initialSubApplied = useRef(false);
+  const userMutedRef = useRef(false);
+  const compatAttempted = useRef(useCompat);
+
+  const [activeSrc, setActiveSrc] = useState(useCompat && compatSrc ? compatSrc : src);
+  const [compatMode, setCompatMode] = useState(useCompat);
+  const [audioNotice, setAudioNotice] = useState<string | null>(audioWarning);
 
   const [playing, setPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -63,7 +87,8 @@ export default function VideoPlayer({ src, title, subtitles = [], onBack, poster
   const [buffered, setBuffered] = useState(0);
   const [volume, setVolume] = useState(() => {
     const saved = localStorage.getItem('eyedpelis_volume');
-    return saved ? parseFloat(saved) : 1;
+    const parsed = saved ? parseFloat(saved) : 1;
+    return Number.isFinite(parsed) ? Math.max(0, Math.min(1, parsed)) : 1;
   });
   const [muted, setMuted] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -102,11 +127,42 @@ export default function VideoPlayer({ src, title, subtitles = [], onBack, poster
   const applyAudioTrack = useCallback((trackIndex: number) => {
     const v = videoRef.current as HTMLVideoElement & { audioTracks?: AudioTrackList };
     if (!v?.audioTracks || v.audioTracks.length === 0) return;
+    const idx = Math.max(0, Math.min(trackIndex, v.audioTracks.length - 1));
     for (let i = 0; i < v.audioTracks.length; i++) {
-      v.audioTracks[i].enabled = i === trackIndex;
+      v.audioTracks[i].enabled = i === idx;
     }
-    setActiveAudio(trackIndex);
+    setActiveAudio(idx);
   }, []);
+
+  const ensureAudioOutput = useCallback(() => {
+    const v = videoRef.current;
+    if (!v || userMutedRef.current || volume <= 0) return;
+    v.muted = false;
+    v.volume = volume;
+    setMuted(false);
+  }, [volume]);
+
+  const ensureAudioTrackEnabled = useCallback((preferred = preferredAudioIndex) => {
+    const v = videoRef.current as HTMLVideoElement & { audioTracks?: AudioTrackList };
+    if (!v?.audioTracks || v.audioTracks.length === 0) return;
+
+    let enabledIdx = -1;
+    for (let i = 0; i < v.audioTracks.length; i++) {
+      if (v.audioTracks[i].enabled) enabledIdx = i;
+    }
+
+    if (enabledIdx < 0) {
+      applyAudioTrack(preferred);
+      return;
+    }
+
+    if (v.audioTracks.length > 1 && enabledIdx !== preferred) {
+      applyAudioTrack(preferred);
+      return;
+    }
+
+    setActiveAudio(enabledIdx);
+  }, [applyAudioTrack, preferredAudioIndex]);
 
   const refreshTracks = useCallback(() => {
     const v = videoRef.current;
@@ -135,6 +191,7 @@ export default function VideoPlayer({ src, title, subtitles = [], onBack, poster
       }
     }
     setAudioTracks(audios);
+    ensureAudioTrackEnabled(preferredAudioIndex);
 
     if (!initialSubApplied.current && subs.length > 0) {
       initialSubApplied.current = true;
@@ -150,7 +207,7 @@ export default function VideoPlayer({ src, title, subtitles = [], onBack, poster
         }
       }
     }
-  }, [applySubtitleTrack]);
+  }, [applySubtitleTrack, ensureAudioTrackEnabled, preferredAudioIndex]);
 
   const togglePlay = useCallback(() => {
     const v = videoRef.current;
@@ -193,6 +250,7 @@ export default function VideoPlayer({ src, title, subtitles = [], onBack, poster
     const v = videoRef.current;
     if (!v) return;
     v.muted = !v.muted;
+    userMutedRef.current = v.muted;
     setMuted(v.muted);
   }, []);
 
@@ -201,11 +259,27 @@ export default function VideoPlayer({ src, title, subtitles = [], onBack, poster
     if (!v) return;
     const clamped = Math.max(0, Math.min(1, val));
     v.volume = clamped;
-    v.muted = clamped === 0;
+    if (clamped > 0) {
+      v.muted = false;
+      userMutedRef.current = false;
+      setMuted(false);
+    } else {
+      v.muted = true;
+      userMutedRef.current = true;
+      setMuted(true);
+    }
     setVolume(clamped);
-    setMuted(clamped === 0);
     localStorage.setItem('eyedpelis_volume', String(clamped));
   };
+
+  const switchToCompatStream = useCallback(() => {
+    if (!compatSrc || compatAttempted.current) return;
+    compatAttempted.current = true;
+    setCompatMode(true);
+    setActiveSrc(compatSrc);
+    setAudioNotice('Audio convertido a AAC para compatibilidad con el navegador.');
+    setBuffering(true);
+  }, [compatSrc]);
 
   const selectSubtitle = (trackIndex: number) => {
     if (trackIndex === -1) {
@@ -242,7 +316,31 @@ export default function VideoPlayer({ src, title, subtitles = [], onBack, poster
     setAudioTracks([]);
     setActiveSub(-1);
     setActiveAudio(0);
-  }, [src]);
+    setActiveSrc(useCompat && compatSrc ? compatSrc : src);
+    setCompatMode(useCompat);
+    setAudioNotice(audioWarning);
+    compatAttempted.current = useCompat;
+  }, [src, compatSrc, useCompat, audioWarning]);
+
+  useEffect(() => {
+    setAudioNotice(audioWarning);
+  }, [audioWarning]);
+
+  useEffect(() => {
+    if (compatMode || !compatSrc || compatAttempted.current) return;
+
+    const timer = window.setInterval(() => {
+      const v = videoRef.current as HTMLVideoElement & { webkitAudioDecodedByteCount?: number };
+      if (!v || v.paused || v.currentTime < 2) return;
+
+      const decoded = v.webkitAudioDecodedByteCount;
+      if (typeof decoded === 'number' && decoded === 0) {
+        switchToCompatStream();
+      }
+    }, 1500);
+
+    return () => window.clearInterval(timer);
+  }, [compatMode, compatSrc, switchToCompatStream, activeSrc]);
 
   useEffect(() => {
     const onFs = () => setIsFullscreen(!!document.fullscreenElement);
@@ -318,12 +416,17 @@ export default function VideoPlayer({ src, title, subtitles = [], onBack, poster
     >
       <video
         ref={videoRef}
-        src={src}
+        key={activeSrc}
+        src={activeSrc}
         poster={poster}
         className="w-full h-full object-contain"
         playsInline
         autoPlay
-        onPlay={() => { setPlaying(true); setBuffering(false); }}
+        onPlay={() => {
+          setPlaying(true);
+          setBuffering(false);
+          ensureAudioOutput();
+        }}
         onPause={() => { setPlaying(false); setShowControls(true); }}
         onTimeUpdate={() => {
           const v = videoRef.current;
@@ -340,8 +443,18 @@ export default function VideoPlayer({ src, title, subtitles = [], onBack, poster
         }}
         onLoadedData={() => refreshTracks()}
         onWaiting={() => setBuffering(true)}
-        onCanPlay={() => setBuffering(false)}
-        onError={() => setError('Error al cargar el video. Comprueba el formato o la conexión.')}
+        onCanPlay={() => {
+          setBuffering(false);
+          ensureAudioOutput();
+          ensureAudioTrackEnabled(preferredAudioIndex);
+        }}
+        onError={() => {
+          if (!compatAttempted.current && compatSrc) {
+            switchToCompatStream();
+            return;
+          }
+          setError('Error al cargar el video. Comprueba el formato o la conexión.');
+        }}
       >
         {subtitles.map(sub => (
           <track
@@ -353,6 +466,12 @@ export default function VideoPlayer({ src, title, subtitles = [], onBack, poster
           />
         ))}
       </video>
+
+      {audioNotice && !error && (
+        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-30 max-w-lg px-4 py-2 bg-amber-950/90 border border-amber-500/30 rounded-lg text-amber-100 text-sm text-center pointer-events-none">
+          {audioNotice}
+        </div>
+      )}
 
       {buffering && !error && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
