@@ -58,3 +58,13 @@
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Subtítulos en el reproductor */
+video::cue {
+  background: rgba(0, 0, 0, 0.75);
+  color: #fff;
+  font-size: clamp(0.9rem, 2.5vw, 1.25rem);
+  line-height: 1.4;
+  padding: 0.1em 0.4em;
+  border-radius: 4px;
+}
