@@ -1,56 +1,20 @@
-import { useEffect, useState } from 'react';
-import { Search as SearchIcon } from 'lucide-react';
-import { api } from '../api';
-import type { MediaItem } from '../types';
 import MediaCard from '../components/MediaCard';
+import LibraryToolbar, { useLibraryPage } from '../components/LibraryToolbar';
 
 export default function Movies() {
-  const [movies, setMovies] = useState<MediaItem[]>([]);
-  const [search, setSearch] = useState('');
-  const [sort, setSort] = useState('title');
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setLoading(true);
-    setError(null);
-    api.getMovies({ search: search || undefined, sort })
-      .then(setMovies)
-      .catch(err => {
-        console.error(err);
-        setError(err instanceof Error ? err.message : 'Error al cargar películas');
-        setMovies([]);
-      })
-      .finally(() => setLoading(false));
-  }, [search, sort]);
+  const { filters, setFilters, items, filterOptions, loading, error } = useLibraryPage('movie');
 
   return (
     <div className="p-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
-        <h1 className="text-3xl font-bold">Películas</h1>
-        <div className="flex gap-3">
-          <div className="relative">
-            <SearchIcon size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
-            <input
-              type="text"
-              placeholder="Buscar en biblioteca..."
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              className="bg-surface-card border border-surface-border rounded-lg pl-10 pr-4 py-2.5 text-sm w-64 focus:outline-none focus:border-accent"
-            />
-          </div>
-          <select
-            value={sort}
-            onChange={e => setSort(e.target.value)}
-            className="bg-surface-card border border-surface-border rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-accent"
-          >
-            <option value="title">Título A-Z</option>
-            <option value="date">Fecha</option>
-            <option value="rating">Valoración</option>
-            <option value="recent">Recientes</option>
-          </select>
-        </div>
-      </div>
+      <h1 className="text-3xl font-bold mb-6">Películas</h1>
+
+      <LibraryToolbar
+        filters={filters}
+        onChange={setFilters}
+        options={filterOptions}
+        loading={loading}
+        resultCount={loading ? undefined : items.length}
+      />
 
       {loading ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
@@ -61,20 +25,19 @@ export default function Movies() {
       ) : error ? (
         <div className="text-center py-20">
           <p className="text-red-400 mb-4">{error}</p>
-          <button type="button" onClick={() => setSort('recent')} className="btn-secondary">Reintentar</button>
+          <button type="button" onClick={() => setFilters(f => ({ ...f, sort: 'recent' }))} className="btn-secondary">
+            Reintentar
+          </button>
         </div>
-      ) : movies.length === 0 ? (
+      ) : items.length === 0 ? (
         <div className="text-center py-20 text-gray-400">
-          <p>No hay películas en tu biblioteca.</p>
-          {search && (
-            <button type="button" onClick={() => setSearch('')} className="text-accent hover:underline mt-3 text-sm">
-              Limpiar búsqueda
-            </button>
-          )}
+          <p>No hay películas con esos filtros.</p>
         </div>
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-          {movies.map(m => <MediaCard key={m.id} item={m} libraryId={m.id} showPlay />)}
+          {items.map((m, i) => (
+            <MediaCard key={m.id} item={m} libraryId={m.id} showPlay index={i} />
+          ))}
         </div>
       )}
     </div>

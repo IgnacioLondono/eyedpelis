@@ -5,7 +5,7 @@ import {
   findMedia, getMediaByPath,
 } from '../db/database.js';
 import { getMoviesPath, getSeriesPath, isMediaReadOnly } from '../config.js';
-import { enrichFromTmdb, tmdbMetadataFields } from './tmdb.js';
+import { enrichFromTmdb, tmdbMetadataWithGenres } from './tmdb.js';
 import { findSubtitles } from './subtitles.js';
 import { parseWithFolderContext } from './filenameParser.js';
 import type { MediaType, MediaItem } from '../types.js';
@@ -49,7 +49,7 @@ function walkDir(dir: string, type: MediaType, results: ParsedFile[] = [], paren
 
 export async function enrichMissingMetadata(): Promise<number> {
   const targets = findMedia(m => {
-    if (m.poster_path && m.tmdb_id) return false;
+    if (m.poster_path && m.tmdb_id && m.genres) return false;
     if (m.type === 'movie') return !!m.file_path;
     return !m.file_path;
   });
@@ -60,7 +60,7 @@ export async function enrichMissingMetadata(): Promise<number> {
     const { title, year: parsedYear } = cleanTitleForSearch(item.title, year);
     const tmdb = await enrichFromTmdb(title, item.type, parsedYear);
     if (tmdb) {
-      updateMedia(item.id, tmdbMetadataFields(tmdb));
+      updateMedia(item.id, await tmdbMetadataWithGenres(tmdb, item.type));
       enriched++;
     }
   }
@@ -80,8 +80,8 @@ async function fetchTmdbForFile(file: ParsedFile) {
   return enrichFromTmdb(title, file.type, year);
 }
 
-function applyTmdbToItem(file: ParsedFile, tmdb: Awaited<ReturnType<typeof fetchTmdbForFile>>) {
-  const meta = tmdbMetadataFields(tmdb);
+async function applyTmdbToItem(file: ParsedFile, tmdb: Awaited<ReturnType<typeof fetchTmdbForFile>>) {
+  const meta = tmdb ? await tmdbMetadataWithGenres(tmdb, file.type) : {};
   return {
     ...meta,
     title: meta.title ?? file.title,
@@ -93,10 +93,10 @@ async function enrichExistingItem(file: ParsedFile, existing: MediaItem) {
   const subs = findSubtitles(file.filePath);
   const updates: Partial<MediaItem> = { file_size: file.fileSize, subtitles: subs };
 
-  if (!existing.tmdb_id || !existing.poster_path) {
+  if (!existing.tmdb_id || !existing.poster_path || !existing.genres) {
     const { title, year } = cleanTitleForSearch(file.title, file.year);
     const tmdb = await enrichFromTmdb(title, file.type, year);
-    Object.assign(updates, applyTmdbToItem(file, tmdb));
+    Object.assign(updates, await applyTmdbToItem(file, tmdb));
   }
 
   return updates;
@@ -138,7 +138,7 @@ export async function scanLibrary(): Promise<ScanResult> {
     }
 
     const tmdb = await fetchTmdbForFile(file);
-    const meta = applyTmdbToItem(file, tmdb);
+    const meta = await applyTmdbToItem(file, tmdb);
     let seriesId: number | null = null;
 
     if (file.type === 'series' && file.season !== undefined) {
@@ -154,7 +154,7 @@ export async function scanLibrary(): Promise<ScanResult> {
         } else {
           const { title, year } = cleanTitleForSearch(file.title, file.year);
           const seriesTmdb = await enrichFromTmdb(title, 'series', year);
-          const seriesMeta = applyTmdbToItem(
+          const seriesMeta = await applyTmdbToItem(
             { ...file, type: 'series', season: undefined, episode: undefined },
             seriesTmdb,
           );
@@ -168,7 +168,7 @@ export async function scanLibrary(): Promise<ScanResult> {
             backdrop_path: seriesMeta.backdrop_path ?? null,
             release_date: seriesMeta.release_date ?? null,
             vote_average: seriesMeta.vote_average ?? null,
-            genres: null,
+            genres: seriesMeta.genres ?? null,
             file_path: null,
             file_size: null,
             duration: null,
@@ -194,7 +194,7 @@ export async function scanLibrary(): Promise<ScanResult> {
       backdrop_path: meta.backdrop_path ?? null,
       release_date: meta.release_date ?? null,
       vote_average: meta.vote_average ?? null,
-      genres: null,
+      genres: meta.genres ?? null,
       file_path: file.filePath,
       file_size: file.fileSize,
       duration: null,

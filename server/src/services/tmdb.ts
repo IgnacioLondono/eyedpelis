@@ -37,6 +37,7 @@ function mapMovieResult(r: Record<string, unknown>): TmdbSearchResult {
     backdrop_path: r.backdrop_path as string | null,
     release_date: r.release_date as string | null,
     vote_average: (r.vote_average as number) || 0,
+    genre_ids: r.genre_ids as number[] | undefined,
   };
 }
 
@@ -51,7 +52,45 @@ function mapSeriesResult(r: Record<string, unknown>): TmdbSearchResult {
     backdrop_path: r.backdrop_path as string | null,
     release_date: r.first_air_date as string | null,
     vote_average: (r.vote_average as number) || 0,
+    genre_ids: r.genre_ids as number[] | undefined,
   };
+}
+
+let movieGenreMap: Map<number, string> | null = null;
+let tvGenreMap: Map<number, string> | null = null;
+
+async function ensureGenreMaps() {
+  if (!movieGenreMap) {
+    const data = await tmdbFetch<{ genres: Array<{ id: number; name: string }> }>('/genre/movie/list');
+    movieGenreMap = new Map(data.genres.map(g => [g.id, g.name]));
+  }
+  if (!tvGenreMap) {
+    const data = await tmdbFetch<{ genres: Array<{ id: number; name: string }> }>('/genre/tv/list');
+    tvGenreMap = new Map(data.genres.map(g => [g.id, g.name]));
+  }
+}
+
+export function genreIdsToString(type: MediaType, ids?: number[]): string | null {
+  if (!ids?.length) return null;
+  const map = type === 'movie' ? movieGenreMap : tvGenreMap;
+  if (!map) return null;
+  const names = ids.map(id => map.get(id)).filter(Boolean);
+  return names.length ? names.join(', ') : null;
+}
+
+async function resolveGenres(type: MediaType, tmdb: TmdbSearchResult): Promise<string | null> {
+  await ensureGenreMaps();
+  const fromIds = genreIdsToString(type, tmdb.genre_ids);
+  if (fromIds) return fromIds;
+  try {
+    const details = type === 'movie'
+      ? await getMovieDetails(tmdb.id)
+      : await getSeriesDetails(tmdb.id);
+    const genres = (details as { genres?: Array<{ name: string }> }).genres;
+    return genres?.map(g => g.name).join(', ') ?? null;
+  } catch {
+    return null;
+  }
 }
 
 function pickByYear(results: TmdbSearchResult[], year?: number): TmdbSearchResult | null {
@@ -132,6 +171,42 @@ export async function getSeriesDetails(id: number) {
   return tmdbFetch(`/tv/${id}`);
 }
 
+export interface TmdbSeasonEpisode {
+  episode_number: number;
+  name: string;
+  overview: string;
+  still_path: string | null;
+  air_date: string | null;
+  runtime: number | null;
+  vote_average: number;
+}
+
+export async function getSeasonDetails(seriesId: number, seasonNumber: number) {
+  const data = await tmdbFetch<{
+    season_number: number;
+    name: string;
+    overview: string;
+    poster_path: string | null;
+    episodes: Array<Record<string, unknown>>;
+  }>(`/tv/${seriesId}/season/${seasonNumber}`);
+
+  return {
+    season_number: data.season_number,
+    name: data.name,
+    overview: data.overview || '',
+    poster_path: data.poster_path as string | null,
+    episodes: (data.episodes || []).map(e => ({
+      episode_number: e.episode_number as number,
+      name: (e.name as string) || `Episodio ${e.episode_number}`,
+      overview: (e.overview as string) || '',
+      still_path: e.still_path as string | null,
+      air_date: (e.air_date as string) || null,
+      runtime: (e.runtime as number) || null,
+      vote_average: (e.vote_average as number) || 0,
+    })) as TmdbSeasonEpisode[],
+  };
+}
+
 export async function getPopular(type: MediaType, page = 1) {
   const endpoint = type === 'movie' ? '/movie/popular' : '/tv/popular';
   const data = await tmdbFetch<{ results: Array<Record<string, unknown>> }>(endpoint, { page: String(page) });
@@ -179,7 +254,7 @@ export async function enrichFromTmdb(
   }
 }
 
-export function tmdbMetadataFields(tmdb: TmdbSearchResult | null) {
+export function tmdbMetadataFields(tmdb: TmdbSearchResult | null, genres?: string | null) {
   if (!tmdb) return {};
   return {
     tmdb_id: tmdb.id,
@@ -190,5 +265,12 @@ export function tmdbMetadataFields(tmdb: TmdbSearchResult | null) {
     backdrop_path: tmdb.backdrop_path,
     release_date: tmdb.release_date,
     vote_average: tmdb.vote_average,
+    genres: genres ?? null,
   };
+}
+
+export async function tmdbMetadataWithGenres(tmdb: TmdbSearchResult | null, type: MediaType) {
+  if (!tmdb) return {};
+  const genres = await resolveGenres(type, tmdb);
+  return tmdbMetadataFields(tmdb, genres);
 }

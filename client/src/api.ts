@@ -35,6 +35,21 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
   return res.json();
 }
 
+export interface LibraryFilterOptions {
+  genres: string[];
+  years: number[];
+}
+
+function libraryQuery(params?: { search?: string; genre?: string; year?: string; sort?: string }) {
+  const q = new URLSearchParams();
+  if (params?.search) q.set('search', params.search);
+  if (params?.genre) q.set('genre', params.genre);
+  if (params?.year) q.set('year', params.year);
+  if (params?.sort) q.set('sort', params.sort);
+  const qs = q.toString();
+  return qs ? `?${qs}` : '';
+}
+
 export const api = {
   login: (username: string, password: string) =>
     request<{ token: string; username: string }>('/auth/login', {
@@ -50,22 +65,19 @@ export const api = {
       body: JSON.stringify({ current, newPassword }),
     }),
   getStats: () => request<import('./types').LibraryStats>('/library/stats'),
-  getMovies: (params?: { search?: string; sort?: string }) => {
-    const q = new URLSearchParams();
-    if (params?.search) q.set('search', params.search);
-    if (params?.sort) q.set('sort', params.sort);
-    const qs = q.toString();
-    return request<import('./types').MediaItem[]>(`/library/movies${qs ? `?${qs}` : ''}`);
-  },
-  getSeries: (search?: string) => {
-    const q = search ? `?search=${encodeURIComponent(search)}` : '';
-    return request<import('./types').MediaItem[]>(`/library/series${q}`);
-  },
+  getMovies: (params?: { search?: string; genre?: string; year?: string; sort?: string }) =>
+    request<import('./types').MediaItem[]>(`/library/movies${libraryQuery(params)}`),
+  getSeries: (params?: { search?: string; genre?: string; year?: string; sort?: string }) =>
+    request<import('./types').MediaItem[]>(`/library/series${libraryQuery(params)}`),
+  getLibraryFilters: (type: 'movie' | 'series') =>
+    request<LibraryFilterOptions>(`/library/filters/${type}`),
   getMedia: (id: number) => request<import('./types').MediaItem>(`/library/${id}`),
   search: (q: string) => request<import('./types').SearchResult[]>(`/search/multi?q=${encodeURIComponent(q)}`),
   getPopular: (type: 'movie' | 'series', page = 1) =>
     request<import('./types').SearchResult[]>(`/search/popular/${type}?page=${page}`),
   getDetails: (type: string, id: number) => request<Record<string, unknown>>(`/search/details/${type}/${id}`),
+  getSeasonDetails: (seriesId: number, seasonNumber: number) =>
+    request<import('./utils/tmdbHelpers').TmdbSeasonDetails>(`/search/season/${seriesId}/${seasonNumber}`),
   getDownloads: () => request<import('./types').DownloadItem[]>('/downloads'),
   addDownload: (data: Record<string, unknown>) =>
     request<import('./types').DownloadItem>('/downloads', {
@@ -116,6 +128,12 @@ export function backdropUrl(path: string | null): string {
   if (!path) return '';
   if (path.startsWith('http')) return path;
   return `https://image.tmdb.org/t/p/w1280${path}`;
+}
+
+export function stillUrl(path: string | null, size = 'w400'): string {
+  if (!path) return '/placeholder-poster.svg';
+  if (path.startsWith('http')) return path;
+  return `https://image.tmdb.org/t/p/${size}${path}`;
 }
 
 export function formatBytes(bytes: number): string {

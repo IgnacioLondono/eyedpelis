@@ -31,6 +31,24 @@ export interface TmdbDetails {
   }>;
 }
 
+export interface TmdbEpisodeInfo {
+  episode_number: number;
+  name: string;
+  overview?: string;
+  still_path?: string | null;
+  air_date?: string | null;
+  runtime?: number | null;
+  vote_average?: number;
+}
+
+export interface TmdbSeasonDetails {
+  season_number: number;
+  name: string;
+  overview?: string;
+  poster_path?: string | null;
+  episodes: TmdbEpisodeInfo[];
+}
+
 export const LANGUAGE_NAMES: Record<string, string> = {
   es: 'Español', en: 'Inglés', fr: 'Francés', de: 'Alemán', it: 'Italiano',
   pt: 'Portugués', ja: 'Japonés', ko: 'Coreano', zh: 'Chino', ru: 'Ruso',

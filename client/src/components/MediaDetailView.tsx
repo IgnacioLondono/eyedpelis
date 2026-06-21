@@ -1,12 +1,12 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Play, Star, Calendar, Clock, Globe, Film, Tv, Subtitles, HardDrive, Tag, FolderOpen, ChevronDown,
 } from 'lucide-react';
-import { backdropUrl, posterUrl, formatDate, formatBytes } from '../api';
+import { api, backdropUrl, posterUrl, stillUrl, formatDate, formatBytes } from '../api';
 import { languageLabel, formatRuntime } from '../utils/tmdbHelpers';
 import type { MediaItem, SubtitleTrack } from '../types';
-import type { TmdbDetails } from '../utils/tmdbHelpers';
+import type { TmdbDetails, TmdbEpisodeInfo } from '../utils/tmdbHelpers';
 
 interface Props {
   media?: MediaItem | null;
@@ -69,6 +69,30 @@ export default function MediaDetailView({ media, tmdb, libraryId, type, episodes
 
   function getSeasonName(season: number): string {
     return seasonMeta.get(season)?.name ?? (season > 0 ? `Temporada ${season}` : 'Especiales');
+  }
+
+  const tmdbSeriesId = media?.tmdb_id ?? tmdb?.id;
+  const [tmdbEpisodes, setTmdbEpisodes] = useState<Map<number, TmdbEpisodeInfo>>(new Map());
+  const [loadingEpisodes, setLoadingEpisodes] = useState(false);
+
+  useEffect(() => {
+    if (!tmdbSeriesId || activeSeason === null) {
+      setTmdbEpisodes(new Map());
+      return;
+    }
+    setLoadingEpisodes(true);
+    api.getSeasonDetails(tmdbSeriesId, activeSeason)
+      .then(data => {
+        const map = new Map<number, TmdbEpisodeInfo>();
+        data.episodes.forEach(ep => map.set(ep.episode_number, ep));
+        setTmdbEpisodes(map);
+      })
+      .catch(() => setTmdbEpisodes(new Map()))
+      .finally(() => setLoadingEpisodes(false));
+  }, [tmdbSeriesId, activeSeason]);
+
+  function getEpisodeMeta(ep: MediaItem): TmdbEpisodeInfo | undefined {
+    return tmdbEpisodes.get(ep.episode ?? 0);
   }
 
   return (
@@ -292,25 +316,81 @@ export default function MediaDetailView({ media, tmdb, libraryId, type, episodes
                 {seasonMeta.get(activeSeason)?.overview && (
                   <p className="text-sm text-gray-400 mb-4 line-clamp-2">{seasonMeta.get(activeSeason)?.overview}</p>
                 )}
-                <div className="space-y-2">
-                  {activeEpisodes.map(ep => (
-                    <Link
-                      key={ep.id}
-                      to={`/watch/${ep.id}`}
-                      className="flex items-center gap-4 bg-surface border border-purple-500/10 rounded-xl p-4 hover:border-accent/40 hover:bg-surface-hover transition-all duration-300 group"
-                    >
-                      <span className="text-sm font-mono text-accent w-14 flex-shrink-0">
-                        E{String(ep.episode).padStart(2, '0')}
-                      </span>
-                      <span className="text-sm flex-1 truncate group-hover:text-white transition-colors">
-                        Episodio {ep.episode}
-                      </span>
-                      {ep.subtitles && ep.subtitles.length > 0 && (
-                        <Subtitles size={14} className="text-gray-500 flex-shrink-0" />
-                      )}
-                      <Play size={16} className="text-accent opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
-                    </Link>
-                  ))}
+                <div className="space-y-3">
+                  {loadingEpisodes && (
+                    <div className="space-y-3">
+                      {activeEpisodes.map(ep => (
+                        <div key={ep.id} className="h-28 rounded-xl shimmer-bg" />
+                      ))}
+                    </div>
+                  )}
+                  {!loadingEpisodes && activeEpisodes.map(ep => {
+                    const meta = getEpisodeMeta(ep);
+                    const epName = meta?.name || `Episodio ${ep.episode}`;
+                    const epOverview = meta?.overview;
+                    const still = meta?.still_path ?? null;
+                    return (
+                      <Link
+                        key={ep.id}
+                        to={`/watch/${ep.id}`}
+                        className="flex gap-4 bg-surface border border-purple-500/10 rounded-xl overflow-hidden hover:border-accent/40 hover:bg-surface-hover transition-all duration-300 group"
+                      >
+                        <div className="relative w-36 sm:w-44 md:w-52 flex-shrink-0 aspect-video bg-surface-card">
+                          <img
+                            src={stillUrl(still)}
+                            alt={epName}
+                            className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                            loading="lazy"
+                            onError={(e) => { (e.target as HTMLImageElement).src = '/placeholder-poster.svg'; }}
+                          />
+                          <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors flex items-center justify-center">
+                            <div className="opacity-0 group-hover:opacity-100 transition-opacity bg-accent rounded-full p-2.5 shadow-purple">
+                              <Play size={20} fill="white" />
+                            </div>
+                          </div>
+                          <span className="absolute top-2 left-2 bg-black/75 backdrop-blur text-xs font-bold px-2 py-0.5 rounded-md text-accent-glow">
+                            E{String(ep.episode).padStart(2, '0')}
+                          </span>
+                        </div>
+                        <div className="flex-1 min-w-0 py-3 pr-4 flex flex-col justify-center">
+                          <div className="flex items-start justify-between gap-2 mb-1">
+                            <h4 className="font-semibold text-sm md:text-base group-hover:text-white transition-colors line-clamp-2">
+                              {epName}
+                            </h4>
+                            {meta?.vote_average != null && meta.vote_average > 0 && (
+                              <span className="flex items-center gap-1 text-xs text-yellow-400 flex-shrink-0">
+                                <Star size={12} fill="currentColor" />
+                                {meta.vote_average.toFixed(1)}
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500 mb-1.5">
+                            {meta?.air_date && (
+                              <span className="inline-flex items-center gap-1">
+                                <Calendar size={12} />
+                                {formatDate(meta.air_date)}
+                              </span>
+                            )}
+                            {meta?.runtime ? (
+                              <span className="inline-flex items-center gap-1">
+                                <Clock size={12} />
+                                {formatRuntime(meta.runtime)}
+                              </span>
+                            ) : null}
+                            {ep.subtitles && ep.subtitles.length > 0 && (
+                              <span className="inline-flex items-center gap-1">
+                                <Subtitles size={12} />
+                                {ep.subtitles.length} subs
+                              </span>
+                            )}
+                          </div>
+                          {epOverview && (
+                            <p className="text-xs md:text-sm text-gray-400 line-clamp-2 leading-relaxed">{epOverview}</p>
+                          )}
+                        </div>
+                      </Link>
+                    );
+                  })}
                 </div>
               </section>
             )}

@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { searchMulti, getPopular, getMovieDetails, getSeriesDetails } from '../services/tmdb.js';
+import { searchMulti, getPopular, getMovieDetails, getSeriesDetails, getSeasonDetails } from '../services/tmdb.js';
 
 const router = Router();
 
@@ -22,6 +22,20 @@ router.get('/popular/:type', async (req, res) => {
     res.json(results);
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : 'Error' });
+  }
+});
+
+router.get('/season/:seriesId/:seasonNumber', async (req, res) => {
+  try {
+    const seriesId = parseInt(req.params.seriesId);
+    const seasonNumber = parseInt(req.params.seasonNumber);
+    if (Number.isNaN(seriesId) || Number.isNaN(seasonNumber)) {
+      return res.status(400).json({ error: 'ID de serie o temporada inválido' });
+    }
+    const details = await getSeasonDetails(seriesId, seasonNumber);
+    res.json(details);
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Error al cargar temporada' });
   }
 });
 
