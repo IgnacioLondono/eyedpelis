@@ -6,7 +6,7 @@ const exec = promisify(execFile);
 const BROWSER_AUDIO_CODECS = new Set(['aac', 'mp3', 'opus', 'vorbis', 'flac', 'pcm_s16le', 'pcm_s24le']);
 
 export interface MediaProbeResult {
-  audioTracks: Array<{ index: number; codec: string; language: string; channels: number }>;
+  audioTracks: Array<{ index: number; streamIndex: number; codec: string; language: string; channels: number }>;
   videoCodec: string | null;
   browserFriendlyAudio: boolean;
   recommendedAudioIndex: number;
@@ -25,6 +25,7 @@ export async function probeMedia(filePath: string): Promise<MediaProbeResult | n
     const data = JSON.parse(stdout) as {
       format?: { duration?: string };
       streams?: Array<{
+        index?: number;
         codec_type?: string;
         codec_name?: string;
         tags?: { language?: string };
@@ -50,6 +51,7 @@ export async function probeMedia(filePath: string): Promise<MediaProbeResult | n
 
     const audioTracks = audioStreams.map((s, index) => ({
       index,
+      streamIndex: s.index ?? index,
       codec: s.codec_name || 'unknown',
       language: s.tags?.language || 'und',
       channels: s.channels || 0,

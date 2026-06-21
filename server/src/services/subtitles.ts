@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { spawn } from 'child_process';
 import type { SubtitleTrack } from '../types.js';
 import { findEmbeddedSubtitles, getEmbeddedSubtitleVtt } from './embeddedSubtitles.js';
 
@@ -94,6 +95,29 @@ export function srtToVtt(content: string): string {
   return out.join('\n');
 }
 
+function convertFileToVtt(filePath: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    const errors: string[] = [];
+    const ffmpeg = spawn('ffmpeg', [
+      '-hide_banner', '-loglevel', 'error',
+      '-i', filePath,
+      '-c:s', 'webvtt',
+      '-f', 'webvtt',
+      'pipe:1',
+    ]);
+    ffmpeg.stdout.on('data', (c: Buffer) => chunks.push(c));
+    ffmpeg.stderr.on('data', (c: Buffer) => errors.push(c.toString()));
+    ffmpeg.on('error', reject);
+    ffmpeg.on('close', (code) => {
+      if (code !== 0) return reject(new Error(errors.join('') || `ffmpeg ${code}`));
+      const text = Buffer.concat(chunks).toString('utf-8');
+      if (!text.trim()) return reject(new Error('Subtítulo vacío'));
+      resolve(text.startsWith('WEBVTT') ? text : `WEBVTT\n\n${text}`);
+    });
+  });
+}
+
 export function getSubtitleContent(filePath: string): { content: string; contentType: string } {
   const ext = path.extname(filePath).toLowerCase();
   const raw = fs.readFileSync(filePath, 'utf-8');
@@ -115,6 +139,12 @@ export async function getSubtitleTrackContent(track: SubtitleTrack): Promise<{ c
 
   if (!track.path || !fs.existsSync(track.path)) {
     throw new Error('Archivo de subtítulo no encontrado');
+  }
+
+  const ext = path.extname(track.path).toLowerCase();
+  if (ext === '.ass' || ext === '.ssa') {
+    const content = await convertFileToVtt(track.path);
+    return { content, contentType: 'text/vtt' };
   }
 
   return getSubtitleContent(track.path);

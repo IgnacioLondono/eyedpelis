@@ -70,10 +70,10 @@ function formatTime(s: number): string {
   return `${m}:${String(sec).padStart(2, '0')}`;
 }
 
-function transcodeUrl(base: string, audio: number, startSec: number): string {
+function transcodeUrl(base: string, audio: number, startSec: number, gen: number): string {
   const sep = base.includes('?') ? '&' : '?';
-  let url = `${base}${sep}audio=${audio}`;
-  if (startSec > 0.5) url += `&start=${startSec.toFixed(1)}`;
+  let url = `${base}${sep}audio=${audio}&_g=${gen}`;
+  if (startSec > 0.5) url += `&start=${startSec.toFixed(2)}`;
   return url;
 }
 
@@ -84,7 +84,7 @@ function initialPlayback(
   audioIndex: number,
 ): Playback {
   if (needsCompat && compatSrc) {
-    return { engine: 'transcode', src: transcodeUrl(compatSrc, audioIndex, 0), audioIndex, offset: 0 };
+    return { engine: 'transcode', src: transcodeUrl(compatSrc, audioIndex, 0, 0), audioIndex, offset: 0 };
   }
   return { engine: 'direct', src, audioIndex, offset: 0 };
 }
@@ -162,6 +162,11 @@ export default function VideoPlayer({
   const seekTimer = useRef<ReturnType<typeof setTimeout>>();
   const subsInit = useRef(false);
   const cuesCache = useRef(new Map<number, VttCue[]>());
+  const timeRef = useRef(0);
+  const playbackRef = useRef<Playback | null>(null);
+  const cuesRef = useRef<VttCue[]>([]);
+  const activeSubRef = useRef(-1);
+  const streamGenRef = useRef(0);
 
   const [playback, setPlayback] = useState<Playback>(() =>
     initialPlayback(src, compatSrc, needsAudioCompat, preferredAudioIndex),
@@ -187,6 +192,7 @@ export default function VideoPlayer({
   const [subtitleCues, setSubtitleCues] = useState<VttCue[]>([]);
   const [activeCue, setActiveCue] = useState<string | null>(null);
   const [loadingSubs, setLoadingSubs] = useState(false);
+  const [subError, setSubError] = useState<string | null>(null);
 
   const audioOptions = useMemo(() =>
     probeAudioTracks.map(t => ({ index: t.index, label: langLabel(t.language), language: t.language })),
@@ -201,23 +207,23 @@ export default function VideoPlayer({
 
   const goTranscode = useCallback((audioIndex: number, atSec: number) => {
     if (!compatSrc) return;
+    streamGenRef.current += 1;
     setPreparing(true);
     setBuffering(true);
     setError(null);
-    setPlayback({
+    const next: Playback = {
       engine: 'transcode',
-      src: transcodeUrl(compatSrc, audioIndex, atSec),
+      src: transcodeUrl(compatSrc, audioIndex, atSec, streamGenRef.current),
       audioIndex,
       offset: atSec,
-    });
+    };
+    playbackRef.current = next;
+    setPlayback(next);
     setCurrentTime(atSec);
+    timeRef.current = atSec;
   }, [compatSrc]);
 
-  const absoluteTime = useCallback(() => {
-    const v = videoRef.current;
-    if (!v) return currentTime;
-    return isTranscode ? playback.offset + v.currentTime : v.currentTime;
-  }, [isTranscode, playback.offset, currentTime]);
+  const absoluteTime = useCallback(() => timeRef.current, []);
 
   const seekTo = useCallback((time: number) => {
     const t = Math.max(0, Math.min(time, duration || time));
@@ -236,32 +242,50 @@ export default function VideoPlayer({
 
   const loadSubs = useCallback(async (idx: number) => {
     const sub = subtitles.find(s => s.index === idx);
-    if (!sub) { setSubtitleCues([]); return; }
+    if (!sub) { setSubtitleCues([]); cuesRef.current = []; return; }
 
     if (cuesCache.current.has(idx)) {
-      setSubtitleCues(cuesCache.current.get(idx)!);
+      const cached = cuesCache.current.get(idx)!;
+      setSubtitleCues(cached);
+      cuesRef.current = cached;
+      setSubError(cached.length === 0 ? 'Sin diálogos en esta pista' : null);
       return;
     }
 
     setLoadingSubs(true);
+    setSubError(null);
     try {
       const token = getAuthToken();
       const res = await fetch(sub.src, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
-      if (!res.ok) throw new Error('fetch');
-      const cues = parseVtt(await res.text());
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const text = await res.text();
+      if (!text.includes('-->')) throw new Error('formato inválido');
+      const cues = parseVtt(text);
       cuesCache.current.set(idx, cues);
       setSubtitleCues(cues);
+      cuesRef.current = cues;
+      if (cues.length === 0) setSubError('No se pudieron leer los subtítulos');
     } catch {
       setSubtitleCues([]);
+      cuesRef.current = [];
+      setSubError('Error al cargar subtítulos');
     } finally {
       setLoadingSubs(false);
     }
   }, [subtitles]);
 
   const selectSub = (idx: number) => {
+    activeSubRef.current = idx;
     setActiveSub(idx);
-    if (idx === -1) { setSubtitleCues([]); setActiveCue(null); localStorage.setItem('eyedpelis_prefer_subs', 'off'); }
-    else { loadSubs(idx); localStorage.setItem('eyedpelis_prefer_subs', 'on'); }
+    if (idx === -1) {
+      setSubtitleCues([]);
+      cuesRef.current = [];
+      setActiveCue(null);
+      setSubError(null);
+      localStorage.setItem('eyedpelis_prefer_subs', 'off');
+    } else {
+      localStorage.setItem('eyedpelis_prefer_subs', 'on');
+    }
     setShowLangMenu(false);
   };
 
@@ -323,13 +347,24 @@ export default function VideoPlayer({
   useEffect(() => {
     subsInit.current = false;
     cuesCache.current.clear();
+    streamGenRef.current = 0;
+    activeSubRef.current = -1;
     setActiveSub(-1);
     setSubtitleCues([]);
+    cuesRef.current = [];
     setActiveCue(null);
+    setSubError(null);
     setError(null);
-    setPlayback(initialPlayback(src, compatSrc, needsAudioCompat, preferredAudioIndex));
+    const pb = initialPlayback(src, compatSrc, needsAudioCompat, preferredAudioIndex);
+    playbackRef.current = pb;
+    setPlayback(pb);
     if (knownDuration) setDuration(knownDuration);
   }, [src, compatSrc, needsAudioCompat, preferredAudioIndex, knownDuration]);
+
+  // Cargar subtítulos al activar pista
+  useEffect(() => {
+    if (activeSub >= 0) loadSubs(activeSub);
+  }, [activeSub, loadSubs]);
 
   // Subtítulos por defecto (español)
   useEffect(() => {
@@ -340,14 +375,30 @@ export default function VideoPlayer({
       const l = (s.language || '').toLowerCase();
       return l.startsWith('es') || l === 'spa';
     });
-    if (es) { setActiveSub(es.index); loadSubs(es.index); }
-  }, [subtitles, loadSubs]);
+    if (es) selectSub(es.index);
+  }, [subtitles]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Sincronizar cue activo
+  // Sincronizar subtítulos con el fotograma del vídeo (más preciso que timeupdate)
   useEffect(() => {
-    if (activeSub < 0 || subtitleCues.length === 0) { setActiveCue(null); return; }
-    setActiveCue(findActiveCue(subtitleCues, currentTime)?.text ?? null);
-  }, [currentTime, activeSub, subtitleCues]);
+    let frame = 0;
+    const tick = () => {
+      const v = videoRef.current;
+      const idx = activeSubRef.current;
+      const cues = cuesRef.current;
+      const pb = playbackRef.current;
+      if (v && idx >= 0 && cues.length > 0 && pb) {
+        const t = pb.engine === 'transcode' ? pb.offset + v.currentTime : v.currentTime;
+        setActiveCue(findActiveCue(cues, t)?.text ?? null);
+      }
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, []);
+
+  useEffect(() => { playbackRef.current = playback; }, [playback]);
+  useEffect(() => { activeSubRef.current = activeSub; }, [activeSub]);
+  useEffect(() => { cuesRef.current = subtitleCues; }, [subtitleCues]);
 
   // Volumen / velocidad
   useEffect(() => {
@@ -409,11 +460,13 @@ export default function VideoPlayer({
         onTimeUpdate={() => {
           const v = videoRef.current;
           if (!v) return;
-          const abs = isTranscode ? playback.offset + v.currentTime : v.currentTime;
+          const pb = playbackRef.current;
+          const abs = pb?.engine === 'transcode' ? (pb.offset + v.currentTime) : v.currentTime;
+          timeRef.current = abs;
           setCurrentTime(abs);
           if (v.buffered.length > 0) {
             const end = v.buffered.end(v.buffered.length - 1);
-            setBuffered(isTranscode ? playback.offset + end : end);
+            setBuffered(pb?.engine === 'transcode' ? (pb!.offset + end) : end);
           }
           if (knownDuration && knownDuration > 0) setDuration(knownDuration);
         }}
@@ -432,14 +485,17 @@ export default function VideoPlayer({
 
       {/* Subtítulos */}
       {activeCue && (
-        <div className="absolute bottom-28 md:bottom-32 left-0 right-0 z-10 flex justify-center px-4 pointer-events-none">
+        <div className="absolute bottom-28 md:bottom-32 left-0 right-0 z-[25] flex justify-center px-4 pointer-events-none">
           <p className="text-center text-white text-base md:text-xl font-medium leading-relaxed max-w-4xl bg-black/85 px-4 py-2.5 rounded-xl shadow-2xl whitespace-pre-line border border-white/10">
             {activeCue}
           </p>
         </div>
       )}
       {loadingSubs && activeSub >= 0 && !activeCue && (
-        <div className="absolute bottom-28 left-1/2 -translate-x-1/2 z-10 text-xs text-white/50">Cargando subtítulos…</div>
+        <div className="absolute bottom-28 left-1/2 -translate-x-1/2 z-[25] text-xs text-white/50">Cargando subtítulos…</div>
+      )}
+      {subError && activeSub >= 0 && !loadingSubs && (
+        <div className="absolute bottom-28 left-1/2 -translate-x-1/2 z-[25] text-xs text-amber-400 bg-black/70 px-3 py-1 rounded-lg">{subError}</div>
       )}
 
       {preparing && !error && (

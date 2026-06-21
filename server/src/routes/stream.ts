@@ -8,6 +8,22 @@ import { probeMedia, codecLabel } from '../services/mediaProbe.js';
 
 const router = Router();
 
+/** Seek en dos fases: salto rápido a keyframe + ajuste fino preciso → A/V sincronizados. */
+const SEEK_CHUNK_SEC = 30;
+
+function buildSeekInputArgs(filePath: string, startSec: number): string[] {
+  if (startSec <= 0.5) return ['-i', filePath];
+
+  const coarse = Math.floor(startSec / SEEK_CHUNK_SEC) * SEEK_CHUNK_SEC;
+  const fine = startSec - coarse;
+
+  if (coarse > 0 && fine > 0.05) {
+    return ['-ss', coarse.toFixed(2), '-i', filePath, '-ss', fine.toFixed(3)];
+  }
+  if (coarse > 0) return ['-ss', coarse.toFixed(2), '-i', filePath];
+  return ['-i', filePath, '-ss', fine.toFixed(3)];
+}
+
 async function syncSubtitles(item: NonNullable<ReturnType<typeof getMediaById>>) {
   if (!item.file_path || !fs.existsSync(item.file_path)) return item.subtitles || [];
 
@@ -93,20 +109,27 @@ router.get('/:id/compat', async (req, res) => {
     : (probe?.recommendedAudioIndex ?? 0);
   const startSec = Math.max(0, parseFloat(req.query.start as string) || 0);
 
+  const audioTrack = probe?.audioTracks[audioIdx];
+  const audioMap = audioTrack?.streamIndex != null
+    ? `0:${audioTrack.streamIndex}`
+    : `0:a:${audioIdx}?`;
+
   res.setHeader('Content-Type', 'video/mp4');
   res.setHeader('Transfer-Encoding', 'chunked');
   res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('X-Playback-Offset', startSec.toFixed(3));
 
   const args = [
     '-hide_banner', '-loglevel', 'error',
-    ...(startSec > 0 ? ['-ss', startSec.toFixed(2)] : []),
-    '-i', item.file_path,
+    ...buildSeekInputArgs(item.file_path, startSec),
     '-map', '0:v:0?',
-    '-map', `0:a:${audioIdx}?`,
+    '-map', audioMap,
     '-c:v', 'copy',
-    '-c:a', 'aac', '-b:a', '192k', '-ac', '2',
-    '-avoid_negative_ts', 'make_zero',
-    '-max_muxing_queue_size', '1024',
+    '-c:a', 'aac', '-b:a', '192k', '-ac', '2', '-ar', '48000',
+    '-af', 'aresample=async=1:first_pts=0',
+    '-fflags', '+genpts',
+    '-reset_timestamps', '1',
+    '-max_interleave_delta', '0',
     '-f', 'mp4',
     '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
     'pipe:1',
