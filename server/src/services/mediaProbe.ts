@@ -10,6 +10,7 @@ export interface MediaProbeResult {
   videoCodec: string | null;
   browserFriendlyAudio: boolean;
   recommendedAudioIndex: number;
+  duration: number | null;
 }
 
 export async function probeMedia(filePath: string): Promise<MediaProbeResult | null> {
@@ -18,9 +19,11 @@ export async function probeMedia(filePath: string): Promise<MediaProbeResult | n
       '-v', 'quiet',
       '-print_format', 'json',
       '-show_streams',
+      '-show_format',
       filePath,
     ]);
     const data = JSON.parse(stdout) as {
+      format?: { duration?: string };
       streams?: Array<{
         codec_type?: string;
         codec_name?: string;
@@ -32,12 +35,16 @@ export async function probeMedia(filePath: string): Promise<MediaProbeResult | n
     const audioStreams = (data.streams || []).filter(s => s.codec_type === 'audio');
     const videoStream = (data.streams || []).find(s => s.codec_type === 'video');
 
+    const durationRaw = parseFloat(data.format?.duration || '');
+    const duration = Number.isFinite(durationRaw) && durationRaw > 0 ? durationRaw : null;
+
     if (audioStreams.length === 0) {
       return {
         audioTracks: [],
         videoCodec: videoStream?.codec_name ?? null,
         browserFriendlyAudio: false,
         recommendedAudioIndex: 0,
+        duration,
       };
     }
 
@@ -76,6 +83,7 @@ export async function probeMedia(filePath: string): Promise<MediaProbeResult | n
       videoCodec: videoStream?.codec_name ?? null,
       browserFriendlyAudio,
       recommendedAudioIndex: recommended,
+      duration,
     };
   } catch {
     return null;

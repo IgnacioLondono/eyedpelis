@@ -45,9 +45,18 @@ interface Props {
   probeAudioTracks?: ProbeAudioTrack[];
   onBack: () => void;
   poster?: string;
-  useCompat?: boolean;
-  audioWarning?: string | null;
+  knownDuration?: number | null;
+  needsAudioCompat?: boolean;
   preferredAudioIndex?: number;
+}
+
+function resolveDuration(videoDuration: number, known: number | null | undefined, currentTime: number): number {
+  if (known && known > 0) {
+    if (!Number.isFinite(videoDuration) || videoDuration < 1 || videoDuration < currentTime) {
+      return known;
+    }
+  }
+  return Number.isFinite(videoDuration) && videoDuration > 0 ? videoDuration : (known ?? 0);
 }
 
 function formatTime(seconds: number): string {
@@ -90,6 +99,9 @@ function TrackMenu({
   onSelectAudio,
   onSelectSubtitle,
   canSwitchAudio,
+  needsAudioCompat,
+  compatMode,
+  onActivateAudio,
 }: {
   open: boolean;
   onClose: () => void;
@@ -100,6 +112,9 @@ function TrackMenu({
   onSelectAudio: (i: number) => void;
   onSelectSubtitle: (i: number) => void;
   canSwitchAudio: boolean;
+  needsAudioCompat?: boolean;
+  compatMode?: boolean;
+  onActivateAudio?: () => void;
 }) {
   if (!open) return null;
 
@@ -116,6 +131,19 @@ function TrackMenu({
         </div>
 
         <div className="max-h-[50vh] overflow-y-auto">
+          {needsAudioCompat && !compatMode && onActivateAudio && (
+            <div className="p-3 border-b border-white/10">
+              <button
+                type="button"
+                className="w-full py-2.5 px-4 rounded-xl bg-accent/20 hover:bg-accent/30 text-accent-glow text-sm font-medium transition-colors"
+                onClick={() => { onActivateAudio(); onClose(); }}
+              >
+                Activar audio compatible
+              </button>
+              <p className="text-[11px] text-gray-500 mt-2 px-1">El archivo usa un códec que el navegador no reproduce directamente.</p>
+            </div>
+          )}
+
           <div className="py-2 border-b border-white/10">
             <p className="px-4 py-1.5 text-[11px] font-semibold text-gray-400 uppercase tracking-widest">Audio</p>
             {audioOptions.length > 0 ? audioOptions.map(a => (
@@ -137,7 +165,7 @@ function TrackMenu({
               <p className="px-4 py-2 text-xs text-gray-500">Pista de audio principal</p>
             )}
             {audioOptions.length > 1 && !canSwitchAudio && (
-              <p className="px-4 pb-2 text-[11px] text-amber-400/80">Cambiando pista de audio…</p>
+              <p className="px-4 pb-2 text-[11px] text-gray-500">Usa «Activar audio» para cambiar de pista</p>
             )}
           </div>
 
@@ -180,7 +208,7 @@ function TrackMenu({
 
 export default function VideoPlayer({
   src, compatSrc, title, subtitles = [], probeAudioTracks = [], onBack, poster,
-  useCompat = false, audioWarning = null, preferredAudioIndex = 0,
+  knownDuration = null, needsAudioCompat = false, preferredAudioIndex = 0,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -188,15 +216,16 @@ export default function VideoPlayer({
   const hideTimer = useRef<ReturnType<typeof setTimeout>>();
   const initialSubApplied = useRef(false);
   const userMutedRef = useRef(false);
-  const compatAttempted = useRef(useCompat);
+  const compatAttempted = useRef(false);
+  const resumeTimeRef = useRef(0);
 
-  const [activeSrc, setActiveSrc] = useState(useCompat && compatSrc ? compatSrc : src);
-  const [compatMode, setCompatMode] = useState(useCompat);
-  const [audioNotice, setAudioNotice] = useState<string | null>(audioWarning);
+  const [activeSrc, setActiveSrc] = useState(src);
+  const [compatMode, setCompatMode] = useState(false);
+  const [activatingAudio, setActivatingAudio] = useState(false);
 
   const [playing, setPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
+  const [duration, setDuration] = useState(knownDuration ?? 0);
   const [buffered, setBuffered] = useState(0);
   const [volume, setVolume] = useState(() => {
     const saved = localStorage.getItem('eyedpelis_volume');
@@ -222,7 +251,7 @@ export default function VideoPlayer({
   const probeAudioOptions = useMemo(() =>
     probeAudioTracks.map(t => ({
       index: t.index,
-      label: `${langLabel(t.language)}${t.codecLabel ? ` · ${t.codecLabel}` : ''}`,
+      label: langLabel(t.language),
       language: t.language,
     })),
   [probeAudioTracks]);
@@ -234,8 +263,7 @@ export default function VideoPlayer({
     : subtitles.map(s => ({ index: s.index, label: s.label }));
 
   const canSwitchAudioBrowser = browserAudioTracks.length > 1;
-  const canSwitchAudioCompat = !canSwitchAudioBrowser && probeAudioOptions.length > 1 && !!compatSrc;
-  const canSwitchAudio = canSwitchAudioBrowser || canSwitchAudioCompat;
+  const canSwitchAudio = canSwitchAudioBrowser;
   const tracksActive = activeSub >= 0 || (audioOptions.length > 1 && activeAudio >= 0);
 
   const revealControls = useCallback(() => {
@@ -267,13 +295,17 @@ export default function VideoPlayer({
   }, []);
 
   const switchCompatAudio = useCallback((trackIndex: number) => {
-    if (!compatSrc) return;
+    if (!compatSrc || compatMode) return;
+    const v = videoRef.current;
+    resumeTimeRef.current = v?.currentTime ?? 0;
     compatAttempted.current = true;
     setCompatMode(true);
+    setActivatingAudio(true);
     setActiveSrc(buildCompatUrl(compatSrc, trackIndex));
     setActiveAudio(trackIndex);
     setBuffering(true);
-  }, [compatSrc]);
+    if (knownDuration) setDuration(knownDuration);
+  }, [compatSrc, compatMode, knownDuration]);
 
   const ensureAudioOutput = useCallback(() => {
     const v = videoRef.current;
@@ -398,14 +430,13 @@ export default function VideoPlayer({
   };
 
   const switchToCompatStream = useCallback((audioIndex = preferredAudioIndex) => {
-    if (!compatSrc || compatAttempted.current) return;
-    compatAttempted.current = true;
-    setCompatMode(true);
-    setActiveSrc(buildCompatUrl(compatSrc, audioIndex));
-    setActiveAudio(audioIndex);
-    setAudioNotice('Audio convertido a AAC para compatibilidad con el navegador.');
-    setBuffering(true);
-  }, [compatSrc, preferredAudioIndex]);
+    switchCompatAudio(audioIndex);
+  }, [switchCompatAudio, preferredAudioIndex]);
+
+  const activateCompatibleAudio = useCallback(() => {
+    if (compatMode || !compatSrc) return;
+    switchCompatAudio(preferredAudioIndex);
+  }, [compatMode, compatSrc, switchCompatAudio, preferredAudioIndex]);
 
   const selectSubtitle = (trackIndex: number) => {
     if (trackIndex === -1) {
@@ -425,12 +456,13 @@ export default function VideoPlayer({
   };
 
   const selectAudio = (trackIndex: number) => {
-    if (!applyBrowserAudioTrack(trackIndex)) {
-      if (canSwitchAudioCompat) {
-        switchCompatAudio(trackIndex);
-      } else if (probeAudioOptions.length > 1 && compatSrc) {
-        switchCompatAudio(trackIndex);
-      }
+    if (trackIndex === activeAudio) {
+      setShowLangMenu(false);
+      return;
+    }
+    if (applyBrowserAudioTrack(trackIndex)) {
+      setShowLangMenu(false);
+      return;
     }
     setShowLangMenu(false);
   };
@@ -448,31 +480,16 @@ export default function VideoPlayer({
     setBrowserAudioTracks([]);
     setActiveSub(-1);
     setActiveAudio(preferredAudioIndex);
-    setActiveSrc(useCompat && compatSrc ? buildCompatUrl(compatSrc, preferredAudioIndex) : src);
-    setCompatMode(useCompat);
-    setAudioNotice(audioWarning);
-    compatAttempted.current = useCompat;
-  }, [src, compatSrc, useCompat, audioWarning, preferredAudioIndex]);
+    setActiveSrc(src);
+    setCompatMode(false);
+    setActivatingAudio(false);
+    compatAttempted.current = false;
+    if (knownDuration) setDuration(knownDuration);
+  }, [src, preferredAudioIndex, knownDuration]);
 
   useEffect(() => {
-    setAudioNotice(audioWarning);
-  }, [audioWarning]);
-
-  useEffect(() => {
-    if (compatMode || !compatSrc || compatAttempted.current) return;
-
-    const timer = window.setInterval(() => {
-      const v = videoRef.current as HTMLVideoElement & { webkitAudioDecodedByteCount?: number };
-      if (!v || v.paused || v.currentTime < 2) return;
-
-      const decoded = v.webkitAudioDecodedByteCount;
-      if (typeof decoded === 'number' && decoded === 0) {
-        switchToCompatStream();
-      }
-    }, 1500);
-
-    return () => window.clearInterval(timer);
-  }, [compatMode, compatSrc, switchToCompatStream, activeSrc]);
+    if (knownDuration && knownDuration > 0) setDuration(knownDuration);
+  }, [knownDuration]);
 
   useEffect(() => {
     const onFs = () => setIsFullscreen(!!document.fullscreenElement);
@@ -569,21 +586,35 @@ export default function VideoPlayer({
           if (v.buffered.length > 0) {
             setBuffered(v.buffered.end(v.buffered.length - 1));
           }
+          if (knownDuration && v.duration > 0 && v.duration < knownDuration * 0.5) {
+            setDuration(knownDuration);
+          }
         }}
         onLoadedMetadata={() => {
           const v = videoRef.current;
-          if (v) setDuration(v.duration);
+          if (v) {
+            setDuration(resolveDuration(v.duration, knownDuration, v.currentTime));
+            if (resumeTimeRef.current > 0) {
+              v.currentTime = resumeTimeRef.current;
+              resumeTimeRef.current = 0;
+            }
+          }
           refreshTracks();
         }}
         onLoadedData={() => refreshTracks()}
         onWaiting={() => setBuffering(true)}
         onCanPlay={() => {
           setBuffering(false);
+          setActivatingAudio(false);
           ensureAudioOutput();
           ensureAudioTrackEnabled(preferredAudioIndex);
+          const v = videoRef.current;
+          if (v && knownDuration) {
+            setDuration(resolveDuration(v.duration, knownDuration, v.currentTime));
+          }
         }}
         onError={() => {
-          if (!compatAttempted.current && compatSrc) {
+          if (!compatAttempted.current && compatSrc && needsAudioCompat) {
             switchToCompatStream();
             return;
           }
@@ -602,9 +633,9 @@ export default function VideoPlayer({
         ))}
       </video>
 
-      {audioNotice && !error && (
-        <div className="absolute top-20 left-1/2 -translate-x-1/2 z-30 max-w-md px-4 py-2.5 bg-black/80 backdrop-blur-md border border-amber-500/30 rounded-xl text-amber-100 text-sm text-center pointer-events-none shadow-lg">
-          {audioNotice}
+      {activatingAudio && !error && (
+        <div className="absolute top-20 left-1/2 -translate-x-1/2 z-30 px-3 py-1.5 bg-black/70 backdrop-blur-sm rounded-lg text-white/70 text-xs pointer-events-none">
+          Preparando audio…
         </div>
       )}
 
@@ -713,7 +744,9 @@ export default function VideoPlayer({
               <button
                 type="button"
                 onClick={() => { setShowLangMenu(s => !s); setShowSettings(false); }}
-                className={`${controlBtn} flex items-center gap-2 ${tracksActive ? 'text-accent-glow bg-accent/10 ring-1 ring-accent/30' : ''}`}
+                className={`${controlBtn} flex items-center gap-2 ${
+                  tracksActive ? 'text-accent-glow bg-accent/10 ring-1 ring-accent/30' : ''
+                } ${needsAudioCompat && !compatMode ? 'ring-1 ring-amber-500/50' : ''}`}
                 aria-label="Audio y subtítulos"
                 title="Audio y subtítulos (C)"
               >
@@ -730,6 +763,9 @@ export default function VideoPlayer({
                 onSelectAudio={selectAudio}
                 onSelectSubtitle={selectSubtitle}
                 canSwitchAudio={canSwitchAudio}
+                needsAudioCompat={needsAudioCompat}
+                compatMode={compatMode}
+                onActivateAudio={activateCompatibleAudio}
               />
             </div>
 

@@ -10,9 +10,9 @@ export default function Player() {
   const [media, setMedia] = useState<MediaItem | null>(null);
   const [subtitleTracks, setSubtitleTracks] = useState<SubtitleTrack[]>([]);
   const [episodeTitle, setEpisodeTitle] = useState<string | null>(null);
-  const [useCompat, setUseCompat] = useState(false);
-  const [audioWarning, setAudioWarning] = useState<string | null>(null);
   const [preferredAudioIndex, setPreferredAudioIndex] = useState(0);
+  const [knownDuration, setKnownDuration] = useState<number | null>(null);
+  const [needsAudioCompat, setNeedsAudioCompat] = useState(false);
   const [probeAudioTracks, setProbeAudioTracks] = useState<Array<{
     index: number; codec: string; codecLabel: string; language: string;
   }>>([]);
@@ -36,15 +36,8 @@ export default function Player() {
       if (streamInfo?.probe) {
         setProbeAudioTracks(streamInfo.probe.audioTracks);
         setPreferredAudioIndex(streamInfo.probe.recommendedAudioIndex);
-        if (!streamInfo.probe.browserFriendlyAudio) {
-          setUseCompat(true);
-          const codecs = streamInfo.probe.audioTracks.map(t => t.codecLabel).join(', ');
-          setAudioWarning(
-            codecs
-              ? `Audio ${codecs} no compatible con el navegador. Convirtiendo a AAC…`
-              : 'Audio no compatible con el navegador. Convirtiendo a AAC…',
-          );
-        }
+        setKnownDuration(streamInfo.probe.duration ?? null);
+        setNeedsAudioCompat(!streamInfo.probe.browserFriendlyAudio);
       }
 
       if (item.series_id && item.season != null && item.episode != null) {
@@ -94,8 +87,8 @@ export default function Player() {
       poster={posterUrl(media.poster_path ?? null)}
       subtitles={subtitles}
       probeAudioTracks={probeAudioTracks}
-      useCompat={useCompat}
-      audioWarning={audioWarning}
+      knownDuration={knownDuration}
+      needsAudioCompat={needsAudioCompat}
       preferredAudioIndex={preferredAudioIndex}
       onBack={() => navigate(-1)}
     />

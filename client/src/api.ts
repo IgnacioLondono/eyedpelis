@@ -122,6 +122,7 @@ export const api = {
       probe: {
         browserFriendlyAudio: boolean;
         recommendedAudioIndex: number;
+        duration: number | null;
         audioTracks: Array<{ index: number; codec: string; codecLabel: string; language: string }>;
         videoCodecLabel: string | null;
       } | null;
