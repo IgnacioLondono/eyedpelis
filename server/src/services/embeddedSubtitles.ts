@@ -94,23 +94,17 @@ export async function findEmbeddedSubtitles(videoPath: string): Promise<Subtitle
   }
 }
 
-function cachePath(videoPath: string, subIndex: number): string {
-  const stat = fs.statSync(videoPath);
-  const key = createHash('sha256')
-    .update(`${videoPath}|${stat.mtimeMs}|${stat.size}|${subIndex}`)
-    .digest('hex');
-  return path.join(CACHE_DIR, `${key}.vtt`);
-}
-
-function extractEmbeddedToVtt(videoPath: string, subIndex: number): Promise<string> {
+function extractEmbeddedToVtt(videoPath: string, subIndex: number, streamIndex?: number): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     const errors: string[] = [];
 
+    const mapArg = streamIndex != null ? `0:${streamIndex}` : `0:s:${subIndex}`;
+
     const ffmpeg = spawn('ffmpeg', [
       '-hide_banner', '-loglevel', 'error',
       '-i', videoPath,
-      '-map', `0:s:${subIndex}`,
+      '-map', mapArg,
       '-c:s', 'webvtt',
       '-f', 'webvtt',
       'pipe:1',
@@ -135,17 +129,23 @@ function extractEmbeddedToVtt(videoPath: string, subIndex: number): Promise<stri
   });
 }
 
-export async function getEmbeddedSubtitleVtt(videoPath: string, subIndex: number): Promise<string> {
+export async function getEmbeddedSubtitleVtt(videoPath: string, subIndex: number, streamIndex?: number): Promise<string> {
   if (!fs.existsSync(videoPath)) throw new Error('Video no encontrado');
 
   if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, { recursive: true });
 
-  const cached = cachePath(videoPath, subIndex);
+  const cacheKey = streamIndex != null ? `${subIndex}|${streamIndex}` : String(subIndex);
+  const stat = fs.statSync(videoPath);
+  const key = createHash('sha256')
+    .update(`${videoPath}|${stat.mtimeMs}|${stat.size}|${cacheKey}`)
+    .digest('hex');
+  const cached = path.join(CACHE_DIR, `${key}.vtt`);
+
   if (fs.existsSync(cached)) {
     return fs.readFileSync(cached, 'utf-8');
   }
 
-  const vtt = await extractEmbeddedToVtt(videoPath, subIndex);
+  const vtt = await extractEmbeddedToVtt(videoPath, subIndex, streamIndex);
   fs.writeFileSync(cached, vtt, 'utf-8');
   return vtt;
 }

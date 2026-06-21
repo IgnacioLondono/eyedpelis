@@ -109,7 +109,7 @@ export function getSubtitleContent(filePath: string): { content: string; content
 
 export async function getSubtitleTrackContent(track: SubtitleTrack): Promise<{ content: string; contentType: string }> {
   if (track.embedded && track.subIndex != null) {
-    const content = await getEmbeddedSubtitleVtt(track.path, track.subIndex);
+    const content = await getEmbeddedSubtitleVtt(track.path, track.subIndex, track.streamIndex);
     return { content, contentType: 'text/vtt' };
   }
 

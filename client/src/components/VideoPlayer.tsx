@@ -4,6 +4,7 @@ import {
   Subtitles, Loader2, SkipBack, SkipForward, Settings, Languages,
 } from 'lucide-react';
 import { findActiveCue, parseVtt, type VttCue } from '../utils/vttParser';
+import { getAuthToken } from '../api';
 
 interface SubtitleOption {
   index: number;
@@ -156,13 +157,13 @@ function TrackMenu({
               <button
                 key={a.index}
                 type="button"
-                disabled={!canSwitchAudio && audioOptions.length > 1 && compatMode}
+                disabled={!canSwitchAudio && audioOptions.length > 1}
                 className={`w-full text-left px-4 py-3 text-sm flex items-center justify-between gap-3 transition-colors ${
-                  canSwitchAudio || audioOptions.length === 1 || !compatMode
+                  canSwitchAudio || audioOptions.length === 1
                     ? 'hover:bg-white/10 cursor-pointer'
                     : 'opacity-60 cursor-default'
                 } ${activeAudio === a.index ? 'text-accent-glow bg-white/5' : 'text-white/90'}`}
-                onClick={() => (canSwitchAudio || !compatMode) && onSelectAudio(a.index)}
+                onClick={() => canSwitchAudio && onSelectAudio(a.index)}
               >
                 <span>{a.label}</span>
                 {activeAudio === a.index && <span className="text-accent-glow text-xs font-bold">●</span>}
@@ -232,6 +233,8 @@ export default function VideoPlayer({
   const seekDebounceRef = useRef<ReturnType<typeof setTimeout>>();
   const pendingSeekRef = useRef<number | null>(null);
   const lastCompatUrlRef = useRef('');
+  const activeAudioRef = useRef(preferredAudioIndex);
+  const srcInitializedRef = useRef(false);
 
   const initialCompat = needsAudioCompat && !!compatSrc;
   const [activeSrc, setActiveSrc] = useState(() =>
@@ -263,6 +266,7 @@ export default function VideoPlayer({
   const [subtitleCues, setSubtitleCues] = useState<VttCue[]>([]);
   const [activeCueText, setActiveCueText] = useState<string | null>(null);
   const [loadingSubs, setLoadingSubs] = useState(false);
+  const [subtitleLoadError, setSubtitleLoadError] = useState<string | null>(null);
   const cuesCache = useRef<Map<number, VttCue[]>>(new Map());
 
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
@@ -276,7 +280,12 @@ export default function VideoPlayer({
     })),
   [probeAudioTracks]);
 
-  const audioOptions = browserAudioTracks.length > 0 ? browserAudioTracks : probeAudioOptions;
+  const useProbeAudioMenu = needsAudioCompat || compatMode || probeAudioOptions.length > 1;
+  const audioOptions = useProbeAudioMenu && probeAudioOptions.length > 0
+    ? probeAudioOptions
+    : browserAudioTracks.length > 0
+      ? browserAudioTracks
+      : probeAudioOptions;
 
   const subtitleOptions = subtitles.map(s => ({ index: s.index, label: s.label }));
 
@@ -307,39 +316,52 @@ export default function VideoPlayer({
     const sub = subtitles.find(s => s.index === trackIndex);
     if (!sub) {
       setSubtitleCues([]);
+      setSubtitleLoadError(null);
       return;
     }
 
     if (cuesCache.current.has(trackIndex)) {
-      setSubtitleCues(cuesCache.current.get(trackIndex)!);
+      const cached = cuesCache.current.get(trackIndex)!;
+      setSubtitleCues(cached);
+      setSubtitleLoadError(cached.length === 0 ? 'Sin diálogos en esta pista' : null);
       return;
     }
 
     setLoadingSubs(true);
+    setSubtitleLoadError(null);
     try {
-      const res = await fetch(sub.src);
-      if (!res.ok) throw new Error('No se pudo cargar el subtítulo');
+      const token = getAuthToken();
+      const res = await fetch(sub.src, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const text = await res.text();
       const cues = parseVtt(text);
       cuesCache.current.set(trackIndex, cues);
       setSubtitleCues(cues);
+      if (cues.length === 0) {
+        setSubtitleLoadError('No se pudieron leer los subtítulos');
+      }
     } catch {
       setSubtitleCues([]);
+      setSubtitleLoadError('Error al cargar subtítulos');
     } finally {
       setLoadingSubs(false);
     }
   }, [subtitles]);
 
   const applyBrowserAudioTrack = useCallback((trackIndex: number) => {
+    if (compatMode || needsAudioCompat) return false;
     const v = videoRef.current as VideoWithAudioTracks;
-    if (!v?.audioTracks || v.audioTracks.length === 0) return false;
+    if (!v?.audioTracks || v.audioTracks.length <= 1) return false;
     const idx = Math.max(0, Math.min(trackIndex, v.audioTracks.length - 1));
     for (let i = 0; i < v.audioTracks.length; i++) {
       v.audioTracks[i].enabled = i === idx;
     }
     setActiveAudio(idx);
+    activeAudioRef.current = idx;
     return true;
-  }, []);
+  }, [compatMode, needsAudioCompat]);
 
   const reloadCompatStream = useCallback((trackIndex: number, startSec: number) => {
     if (!compatSrc) return;
@@ -352,6 +374,7 @@ export default function VideoPlayer({
     setError(null);
     setCurrentTime(startSec);
     setActiveAudio(trackIndex);
+    activeAudioRef.current = trackIndex;
     setActivatingAudio(true);
     setBuffering(true);
     if (knownDuration) setDuration(knownDuration);
@@ -364,9 +387,7 @@ export default function VideoPlayer({
   }, [compatSrc, compatMode, knownDuration]);
 
   const switchCompatAudio = useCallback((trackIndex: number, startAt?: number) => {
-    const v = videoRef.current;
-    const t = startAt ?? v?.currentTime ?? currentTime;
-    reloadCompatStream(trackIndex, t);
+    reloadCompatStream(trackIndex, startAt ?? currentTime);
   }, [reloadCompatStream, currentTime]);
 
   const ensureAudioOutput = useCallback(() => {
@@ -378,30 +399,36 @@ export default function VideoPlayer({
   }, [volume]);
 
   const ensureAudioTrackEnabled = useCallback((preferred = preferredAudioIndex) => {
+    if (compatMode || needsAudioCompat) return;
     if (applyBrowserAudioTrack(preferred)) return;
     setActiveAudio(preferred);
-  }, [applyBrowserAudioTrack, preferredAudioIndex]);
+    activeAudioRef.current = preferred;
+  }, [applyBrowserAudioTrack, preferredAudioIndex, compatMode, needsAudioCompat]);
 
   const refreshTracks = useCallback(() => {
     const v = videoRef.current;
     if (!v) return;
 
-    const audios: AudioOption[] = [];
-    const at = (v as VideoWithAudioTracks).audioTracks;
-    if (at && at.length > 0) {
-      for (let i = 0; i < at.length; i++) {
-        const t = at[i];
-        audios.push({
-          index: i,
-          label: t.label || langLabel(t.language, `Audio ${i + 1}`),
-          language: t.language || 'und',
-        });
-        if (t.enabled) setActiveAudio(i);
+    if (!compatMode && !needsAudioCompat) {
+      const audios: AudioOption[] = [];
+      const at = (v as VideoWithAudioTracks).audioTracks;
+      if (at && at.length > 1) {
+        for (let i = 0; i < at.length; i++) {
+          const t = at[i];
+          audios.push({
+            index: i,
+            label: t.label || langLabel(t.language, `Audio ${i + 1}`),
+            language: t.language || 'und',
+          });
+          if (t.enabled) {
+            setActiveAudio(i);
+            activeAudioRef.current = i;
+          }
+        }
       }
+      setBrowserAudioTracks(audios);
+      if (audios.length > 0) ensureAudioTrackEnabled(preferredAudioIndex);
     }
-    setBrowserAudioTracks(audios);
-    if (audios.length === 0) setActiveAudio(preferredAudioIndex);
-    else ensureAudioTrackEnabled(preferredAudioIndex);
 
     if (!initialSubApplied.current && subtitles.length > 0) {
       initialSubApplied.current = true;
@@ -415,7 +442,11 @@ export default function VideoPlayer({
         }
       }
     }
-  }, [applySubtitleTrack, ensureAudioTrackEnabled, preferredAudioIndex, subtitles]);
+  }, [applySubtitleTrack, ensureAudioTrackEnabled, preferredAudioIndex, subtitles, compatMode, needsAudioCompat]);
+
+  useEffect(() => {
+    activeAudioRef.current = activeAudio;
+  }, [activeAudio]);
 
   const togglePlay = useCallback(() => {
     const v = videoRef.current;
@@ -503,6 +534,7 @@ export default function VideoPlayer({
       setActiveSub(-1);
       setSubtitleCues([]);
       setActiveCueText(null);
+      setSubtitleLoadError(null);
       localStorage.setItem('eyedpelis_prefer_subs', 'off');
     } else {
       applySubtitleTrack(trackIndex);
@@ -517,13 +549,16 @@ export default function VideoPlayer({
       setShowLangMenu(false);
       return;
     }
+    if (compatMode || needsAudioCompat) {
+      if (compatSrc) switchCompatAudio(trackIndex, currentTime);
+      setShowLangMenu(false);
+      return;
+    }
     if (applyBrowserAudioTrack(trackIndex)) {
       setShowLangMenu(false);
       return;
     }
-    if (compatSrc && (needsAudioCompat || compatMode)) {
-      switchCompatAudio(trackIndex);
-    }
+    if (compatSrc) switchCompatAudio(trackIndex, currentTime);
     setShowLangMenu(false);
   };
 
@@ -561,6 +596,19 @@ export default function VideoPlayer({
   }, []);
 
   useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    if (!srcInitializedRef.current) {
+      srcInitializedRef.current = true;
+      return;
+    }
+    setError(null);
+    setBuffering(true);
+    v.load();
+  }, [activeSrc]);
+
+  useEffect(() => {
+    srcInitializedRef.current = false;
     initialSubApplied.current = false;
     setBrowserAudioTracks([]);
     setActiveSub(-1);
@@ -719,7 +767,9 @@ export default function VideoPlayer({
           setActivatingAudio(false);
           setError(null);
           ensureAudioOutput();
-          ensureAudioTrackEnabled(preferredAudioIndex);
+          if (!compatMode && !needsAudioCompat) {
+            ensureAudioTrackEnabled(preferredAudioIndex);
+          }
           const v = videoRef.current;
           if (v) {
             if (compatMode && knownDuration) {
@@ -752,6 +802,12 @@ export default function VideoPlayer({
       {loadingSubs && activeSub >= 0 && !activeCueText && (
         <div className="absolute bottom-28 left-1/2 -translate-x-1/2 z-10 text-xs text-white/50 pointer-events-none">
           Cargando subtítulos…
+        </div>
+      )}
+
+      {subtitleLoadError && activeSub >= 0 && !loadingSubs && (
+        <div className="absolute bottom-28 left-1/2 -translate-x-1/2 z-10 text-xs text-amber-400/90 pointer-events-none bg-black/70 px-3 py-1 rounded-lg">
+          {subtitleLoadError}
         </div>
       )}
 
