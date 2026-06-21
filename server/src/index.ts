@@ -23,7 +23,17 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = parseInt(process.env.PORT || '3001');
 
-app.use(cors({ origin: process.env.CLIENT_URL || 'http://localhost:5173' }));
+app.use(cors({
+  origin: (origin, callback) => {
+    const allowed = process.env.CLIENT_URL || 'http://localhost:5173';
+    if (!origin || origin === allowed || origin.startsWith('http://192.168.') || origin.startsWith('http://10.')) {
+      callback(null, true);
+    } else {
+      callback(null, allowed);
+    }
+  },
+  credentials: true,
+}));
 app.use(express.json());
 
 await initAuth();

@@ -56,6 +56,10 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction) 
   if (!isAuthEnabled()) return next();
 
   const url = req.originalUrl.split('?')[0];
+
+  // Solo proteger la API — la web (HTML/JS/CSS) debe cargar sin token
+  if (!url.startsWith('/api')) return next();
+
   if (url === '/api/auth/login' || url === '/api/auth/me' || url === '/api/health') return next();
 
   const header = req.headers.authorization;
