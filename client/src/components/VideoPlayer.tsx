@@ -6,6 +6,8 @@ import {
 import { findActiveCue, parseVtt, type VttCue } from '../utils/vttParser';
 import { getAuthToken } from '../api';
 
+/* ─── Tipos ─── */
+
 interface SubtitleOption {
   index: number;
   label: string;
@@ -19,32 +21,12 @@ interface AudioOption {
   language: string;
 }
 
-interface ProbeAudioTrack {
-  index: number;
-  codec: string;
-  codecLabel: string;
-  language: string;
-}
-
-interface VideoAudioTrack {
-  enabled: boolean;
-  label: string;
-  language: string;
-}
-
-interface VideoAudioTrackList {
-  length: number;
-  [index: number]: VideoAudioTrack;
-}
-
-type VideoWithAudioTracks = HTMLVideoElement & { audioTracks?: VideoAudioTrackList };
-
 interface Props {
   src: string;
   compatSrc?: string;
   title: string;
   subtitles?: SubtitleOption[];
-  probeAudioTracks?: ProbeAudioTrack[];
+  probeAudioTracks?: Array<{ index: number; language: string; codecLabel?: string }>;
   onBack: () => void;
   poster?: string;
   knownDuration?: number | null;
@@ -52,25 +34,19 @@ interface Props {
   preferredAudioIndex?: number;
 }
 
-function resolveDuration(videoDuration: number, known: number | null | undefined, currentTime: number): number {
-  if (known && known > 0) {
-    if (!Number.isFinite(videoDuration) || videoDuration < 1 || videoDuration < currentTime) {
-      return known;
-    }
-  }
-  return Number.isFinite(videoDuration) && videoDuration > 0 ? videoDuration : (known ?? 0);
+type Engine = 'direct' | 'transcode';
+
+interface Playback {
+  engine: Engine;
+  src: string;
+  audioIndex: number;
+  /** Tiempo absoluto del archivo donde empieza el segmento actual (solo transcode). */
+  offset: number;
 }
 
-function formatTime(seconds: number): string {
-  if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = Math.floor(seconds % 60);
-  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-  return `${m}:${String(s).padStart(2, '0')}`;
-}
+/* ─── Utilidades ─── */
 
-const LANG_LABELS: Record<string, string> = {
+const LANG: Record<string, string> = {
   es: 'Español', spa: 'Español', esp: 'Español',
   en: 'English', eng: 'English',
   ja: 'Japonés', jpn: 'Japonés',
@@ -78,143 +54,102 @@ const LANG_LABELS: Record<string, string> = {
   de: 'Alemán', ger: 'Alemán', deu: 'Alemán',
   it: 'Italiano', ita: 'Italiano',
   pt: 'Portugués', por: 'Portugués',
-  und: 'Desconocido',
 };
 
-function langLabel(code: string, fallback?: string): string {
+function langLabel(code: string): string {
   const c = code.toLowerCase();
-  return LANG_LABELS[c] || fallback || code.toUpperCase();
+  return LANG[c] || LANG[c.slice(0, 2)] || code.toUpperCase();
 }
 
-function buildCompatUrl(base: string, audioIndex: number, startSec = 0): string {
+function formatTime(s: number): string {
+  if (!Number.isFinite(s) || s < 0) return '0:00';
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = Math.floor(s % 60);
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+  return `${m}:${String(sec).padStart(2, '0')}`;
+}
+
+function transcodeUrl(base: string, audio: number, startSec: number): string {
   const sep = base.includes('?') ? '&' : '?';
-  let url = `${base}${sep}audio=${audioIndex}`;
+  let url = `${base}${sep}audio=${audio}`;
   if (startSec > 0.5) url += `&start=${startSec.toFixed(1)}`;
   return url;
 }
 
-function isPlayInterrupted(err: unknown): boolean {
-  return err instanceof DOMException && (err.name === 'AbortError' || err.name === 'NotAllowedError');
-}
-
-async function safePlay(video: HTMLVideoElement): Promise<void> {
-  try {
-    await video.play();
-  } catch (err) {
-    if (!isPlayInterrupted(err)) throw err;
+function initialPlayback(
+  src: string,
+  compatSrc: string | undefined,
+  needsCompat: boolean,
+  audioIndex: number,
+): Playback {
+  if (needsCompat && compatSrc) {
+    return { engine: 'transcode', src: transcodeUrl(compatSrc, audioIndex, 0), audioIndex, offset: 0 };
   }
+  return { engine: 'direct', src, audioIndex, offset: 0 };
 }
 
-function TrackMenu({
-  open,
-  onClose,
-  audioOptions,
-  subtitleOptions,
-  activeAudio,
-  activeSub,
-  onSelectAudio,
-  onSelectSubtitle,
-  canSwitchAudio,
-  needsAudioCompat,
-  compatMode,
-}: {
+async function tryPlay(v: HTMLVideoElement) {
+  try { await v.play(); } catch { /* autoplay bloqueado */ }
+}
+
+/* ─── Menú de pistas ─── */
+
+function TrackMenu({ open, onClose, audioOptions, subtitleOptions, activeAudio, activeSub, onAudio, onSub }: {
   open: boolean;
   onClose: () => void;
   audioOptions: AudioOption[];
   subtitleOptions: { index: number; label: string }[];
   activeAudio: number;
   activeSub: number;
-  onSelectAudio: (i: number) => void;
-  onSelectSubtitle: (i: number) => void;
-  canSwitchAudio: boolean;
-  needsAudioCompat?: boolean;
-  compatMode?: boolean;
+  onAudio: (i: number) => void;
+  onSub: (i: number) => void;
 }) {
   if (!open) return null;
-
   return (
     <>
       <div className="fixed inset-0 z-40" onClick={onClose} aria-hidden />
-      <div
-        className="absolute bottom-full right-0 mb-3 z-50 w-[min(320px,calc(100vw-2rem))] rounded-2xl border border-white/10 bg-black/95 backdrop-blur-xl shadow-2xl shadow-black/60 overflow-hidden animate-fade-in"
-        onClick={e => e.stopPropagation()}
-      >
+      <div className="absolute bottom-full right-0 mb-3 z-50 w-[min(320px,calc(100vw-2rem))] rounded-2xl border border-white/10 bg-black/95 backdrop-blur-xl shadow-2xl overflow-hidden animate-fade-in" onClick={e => e.stopPropagation()}>
         <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between">
           <span className="text-sm font-semibold text-white/90">Audio y subtítulos</span>
           <Languages size={16} className="text-accent-glow" />
         </div>
-
         <div className="max-h-[50vh] overflow-y-auto">
-          {needsAudioCompat && compatMode && (
-            <p className="px-4 py-2.5 text-[11px] text-gray-500 border-b border-white/10">
-              Audio convertido automáticamente para el navegador.
-            </p>
-          )}
-
           <div className="py-2 border-b border-white/10">
             <p className="px-4 py-1.5 text-[11px] font-semibold text-gray-400 uppercase tracking-widest">Audio</p>
             {audioOptions.length > 0 ? audioOptions.map(a => (
-              <button
-                key={a.index}
-                type="button"
-                disabled={!canSwitchAudio && audioOptions.length > 1}
-                className={`w-full text-left px-4 py-3 text-sm flex items-center justify-between gap-3 transition-colors ${
-                  canSwitchAudio || audioOptions.length === 1
-                    ? 'hover:bg-white/10 cursor-pointer'
-                    : 'opacity-60 cursor-default'
-                } ${activeAudio === a.index ? 'text-accent-glow bg-white/5' : 'text-white/90'}`}
-                onClick={() => canSwitchAudio && onSelectAudio(a.index)}
-              >
+              <button key={a.index} type="button" onClick={() => onAudio(a.index)}
+                className={`w-full text-left px-4 py-3 text-sm hover:bg-white/10 flex items-center justify-between ${activeAudio === a.index ? 'text-accent-glow bg-white/5' : 'text-white/90'}`}>
                 <span>{a.label}</span>
                 {activeAudio === a.index && <span className="text-accent-glow text-xs font-bold">●</span>}
               </button>
-            )) : (
-              <p className="px-4 py-2 text-xs text-gray-500">Pista de audio principal</p>
-            )}
-            {needsAudioCompat && compatMode && audioOptions.length > 1 && (
-              <p className="px-4 pb-2 text-[11px] text-gray-500">Cambiar idioma reinicia el audio en ese punto</p>
-            )}
-            {needsAudioCompat && !compatMode && audioOptions.length > 1 && (
-              <p className="px-4 pb-2 text-[11px] text-gray-500">Elige un idioma para activar el audio</p>
-            )}
+            )) : <p className="px-4 py-2 text-xs text-gray-500">Pista principal</p>}
           </div>
-
           <div className="py-2">
             <p className="px-4 py-1.5 text-[11px] font-semibold text-gray-400 uppercase tracking-widest flex items-center gap-1.5">
               <Subtitles size={12} /> Subtítulos
             </p>
-            <button
-              type="button"
-              className={`w-full text-left px-4 py-3 text-sm hover:bg-white/10 flex items-center justify-between transition-colors ${
-                activeSub === -1 ? 'text-accent-glow bg-white/5' : 'text-white/90'
-              }`}
-              onClick={() => onSelectSubtitle(-1)}
-            >
+            <button type="button" onClick={() => onSub(-1)}
+              className={`w-full text-left px-4 py-3 text-sm hover:bg-white/10 flex items-center justify-between ${activeSub === -1 ? 'text-accent-glow bg-white/5' : 'text-white/90'}`}>
               <span>Desactivados</span>
               {activeSub === -1 && <span className="text-accent-glow text-xs font-bold">●</span>}
             </button>
             {subtitleOptions.map(t => (
-              <button
-                key={t.index}
-                type="button"
-                className={`w-full text-left px-4 py-3 text-sm hover:bg-white/10 flex items-center justify-between gap-3 transition-colors ${
-                  activeSub === t.index ? 'text-accent-glow bg-white/5' : 'text-white/90'
-                }`}
-                onClick={() => onSelectSubtitle(t.index)}
-              >
+              <button key={t.index} type="button" onClick={() => onSub(t.index)}
+                className={`w-full text-left px-4 py-3 text-sm hover:bg-white/10 flex items-center justify-between ${activeSub === t.index ? 'text-accent-glow bg-white/5' : 'text-white/90'}`}>
                 <span>{t.label}</span>
                 {activeSub === t.index && <span className="text-accent-glow text-xs font-bold">●</span>}
               </button>
             ))}
-            {subtitleOptions.length === 0 && (
-              <p className="px-4 py-2 text-xs text-gray-500">No hay subtítulos para este archivo</p>
-            )}
+            {subtitleOptions.length === 0 && <p className="px-4 py-2 text-xs text-gray-500">Sin subtítulos</p>}
           </div>
         </div>
       </div>
     </>
   );
 }
+
+/* ─── Reproductor ─── */
 
 export default function VideoPlayer({
   src, compatSrc, title, subtitles = [], probeAudioTracks = [], onBack, poster,
@@ -224,596 +159,292 @@ export default function VideoPlayer({
   const videoRef = useRef<HTMLVideoElement>(null);
   const progressRef = useRef<HTMLDivElement>(null);
   const hideTimer = useRef<ReturnType<typeof setTimeout>>();
-  const initialSubApplied = useRef(false);
-  const userMutedRef = useRef(false);
-  const compatAttempted = useRef(false);
-  const resumeTimeRef = useRef(0);
-  const isCompatSeeking = useRef(false);
-  const compatStartOffset = useRef(0);
-  const seekDebounceRef = useRef<ReturnType<typeof setTimeout>>();
-  const pendingSeekRef = useRef<number | null>(null);
-  const lastCompatUrlRef = useRef('');
-  const activeAudioRef = useRef(preferredAudioIndex);
-  const srcInitializedRef = useRef(false);
+  const seekTimer = useRef<ReturnType<typeof setTimeout>>();
+  const subsInit = useRef(false);
+  const cuesCache = useRef(new Map<number, VttCue[]>());
 
-  const initialCompat = needsAudioCompat && !!compatSrc;
-  const [activeSrc, setActiveSrc] = useState(() =>
-    initialCompat ? buildCompatUrl(compatSrc!, preferredAudioIndex, 0) : src,
+  const [playback, setPlayback] = useState<Playback>(() =>
+    initialPlayback(src, compatSrc, needsAudioCompat, preferredAudioIndex),
   );
-  const [compatMode, setCompatMode] = useState(initialCompat);
-  const [activatingAudio, setActivatingAudio] = useState(false);
-
   const [playing, setPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(knownDuration ?? 0);
   const [buffered, setBuffered] = useState(0);
   const [volume, setVolume] = useState(() => {
-    const saved = localStorage.getItem('eyedpelis_volume');
-    const parsed = saved ? parseFloat(saved) : 1;
-    return Number.isFinite(parsed) ? Math.max(0, Math.min(1, parsed)) : 1;
+    const v = parseFloat(localStorage.getItem('eyedpelis_volume') || '1');
+    return Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 1;
   });
   const [muted, setMuted] = useState(false);
-  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
   const [showControls, setShowControls] = useState(true);
   const [buffering, setBuffering] = useState(true);
-  const [activeSub, setActiveSub] = useState(-1);
-  const [activeAudio, setActiveAudio] = useState(preferredAudioIndex);
-  const [browserAudioTracks, setBrowserAudioTracks] = useState<AudioOption[]>([]);
+  const [preparing, setPreparing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [showLangMenu, setShowLangMenu] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [playbackRate, setPlaybackRate] = useState(1);
-  const [error, setError] = useState<string | null>(null);
+  const [activeSub, setActiveSub] = useState(-1);
   const [subtitleCues, setSubtitleCues] = useState<VttCue[]>([]);
-  const [activeCueText, setActiveCueText] = useState<string | null>(null);
+  const [activeCue, setActiveCue] = useState<string | null>(null);
   const [loadingSubs, setLoadingSubs] = useState(false);
-  const [subtitleLoadError, setSubtitleLoadError] = useState<string | null>(null);
-  const cuesCache = useRef<Map<number, VttCue[]>>(new Map());
 
-  const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
-  const bufferProgress = duration > 0 ? (buffered / duration) * 100 : 0;
-
-  const probeAudioOptions = useMemo(() =>
-    probeAudioTracks.map(t => ({
-      index: t.index,
-      label: langLabel(t.language),
-      language: t.language,
-    })),
+  const audioOptions = useMemo(() =>
+    probeAudioTracks.map(t => ({ index: t.index, label: langLabel(t.language), language: t.language })),
   [probeAudioTracks]);
 
-  const useProbeAudioMenu = needsAudioCompat || compatMode || probeAudioOptions.length > 1;
-  const audioOptions = useProbeAudioMenu && probeAudioOptions.length > 0
-    ? probeAudioOptions
-    : browserAudioTracks.length > 0
-      ? browserAudioTracks
-      : probeAudioOptions;
-
   const subtitleOptions = subtitles.map(s => ({ index: s.index, label: s.label }));
+  const isTranscode = playback.engine === 'transcode';
+  const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
+  const bufPct = duration > 0 ? (buffered / duration) * 100 : 0;
 
-  const canSwitchAudioBrowser = browserAudioTracks.length > 1;
-  const canSwitchAudioCompat = probeAudioOptions.length > 1 && !!compatSrc;
-  const canSwitchAudio = canSwitchAudioBrowser || canSwitchAudioCompat;
-  const tracksActive = activeSub >= 0 || (audioOptions.length > 1 && activeAudio >= 0);
+  /* ── Cambiar motor de reproducción ── */
 
-  const revealControls = useCallback(() => {
-    setShowControls(true);
-    if (hideTimer.current) clearTimeout(hideTimer.current);
-    if (playing) {
-      hideTimer.current = setTimeout(() => setShowControls(false), 4000);
-    }
-  }, [playing]);
+  const goTranscode = useCallback((audioIndex: number, atSec: number) => {
+    if (!compatSrc) return;
+    setPreparing(true);
+    setBuffering(true);
+    setError(null);
+    setPlayback({
+      engine: 'transcode',
+      src: transcodeUrl(compatSrc, audioIndex, atSec),
+      audioIndex,
+      offset: atSec,
+    });
+    setCurrentTime(atSec);
+  }, [compatSrc]);
 
-  const applySubtitleTrack = useCallback((trackIndex: number) => {
+  const absoluteTime = useCallback(() => {
     const v = videoRef.current;
-    if (v) {
-      for (let i = 0; i < v.textTracks.length; i++) {
-        v.textTracks[i].mode = 'hidden';
-      }
-    }
-    setActiveSub(trackIndex);
-  }, []);
+    if (!v) return currentTime;
+    return isTranscode ? playback.offset + v.currentTime : v.currentTime;
+  }, [isTranscode, playback.offset, currentTime]);
 
-  const loadSubtitleCues = useCallback(async (trackIndex: number) => {
-    const sub = subtitles.find(s => s.index === trackIndex);
-    if (!sub) {
-      setSubtitleCues([]);
-      setSubtitleLoadError(null);
+  const seekTo = useCallback((time: number) => {
+    const t = Math.max(0, Math.min(time, duration || time));
+    if (isTranscode && compatSrc) {
+      setCurrentTime(t);
+      if (seekTimer.current) clearTimeout(seekTimer.current);
+      seekTimer.current = setTimeout(() => goTranscode(playback.audioIndex, t), 400);
       return;
     }
+    const v = videoRef.current;
+    if (v) v.currentTime = t;
+    setCurrentTime(t);
+  }, [duration, isTranscode, compatSrc, playback.audioIndex, goTranscode]);
 
-    if (cuesCache.current.has(trackIndex)) {
-      const cached = cuesCache.current.get(trackIndex)!;
-      setSubtitleCues(cached);
-      setSubtitleLoadError(cached.length === 0 ? 'Sin diálogos en esta pista' : null);
+  /* ── Subtítulos ── */
+
+  const loadSubs = useCallback(async (idx: number) => {
+    const sub = subtitles.find(s => s.index === idx);
+    if (!sub) { setSubtitleCues([]); return; }
+
+    if (cuesCache.current.has(idx)) {
+      setSubtitleCues(cuesCache.current.get(idx)!);
       return;
     }
 
     setLoadingSubs(true);
-    setSubtitleLoadError(null);
     try {
       const token = getAuthToken();
-      const res = await fetch(sub.src, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const text = await res.text();
-      const cues = parseVtt(text);
-      cuesCache.current.set(trackIndex, cues);
+      const res = await fetch(sub.src, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+      if (!res.ok) throw new Error('fetch');
+      const cues = parseVtt(await res.text());
+      cuesCache.current.set(idx, cues);
       setSubtitleCues(cues);
-      if (cues.length === 0) {
-        setSubtitleLoadError('No se pudieron leer los subtítulos');
-      }
     } catch {
       setSubtitleCues([]);
-      setSubtitleLoadError('Error al cargar subtítulos');
     } finally {
       setLoadingSubs(false);
     }
   }, [subtitles]);
 
-  const applyBrowserAudioTrack = useCallback((trackIndex: number) => {
-    if (compatMode || needsAudioCompat) return false;
-    const v = videoRef.current as VideoWithAudioTracks;
-    if (!v?.audioTracks || v.audioTracks.length <= 1) return false;
-    const idx = Math.max(0, Math.min(trackIndex, v.audioTracks.length - 1));
-    for (let i = 0; i < v.audioTracks.length; i++) {
-      v.audioTracks[i].enabled = i === idx;
+  const selectSub = (idx: number) => {
+    setActiveSub(idx);
+    if (idx === -1) { setSubtitleCues([]); setActiveCue(null); localStorage.setItem('eyedpelis_prefer_subs', 'off'); }
+    else { loadSubs(idx); localStorage.setItem('eyedpelis_prefer_subs', 'on'); }
+    setShowLangMenu(false);
+  };
+
+  const selectAudio = (idx: number) => {
+    if (idx === playback.audioIndex) { setShowLangMenu(false); return; }
+    if (isTranscode || needsAudioCompat) {
+      goTranscode(idx, absoluteTime());
+    } else {
+      setPlayback(p => ({ ...p, audioIndex: idx }));
     }
-    setActiveAudio(idx);
-    activeAudioRef.current = idx;
-    return true;
-  }, [compatMode, needsAudioCompat]);
+    setShowLangMenu(false);
+  };
 
-  const reloadCompatStream = useCallback((trackIndex: number, startSec: number) => {
-    if (!compatSrc) return;
-    const url = buildCompatUrl(compatSrc, trackIndex, startSec);
-    if (url === lastCompatUrlRef.current) return;
+  /* ── Controles ── */
 
-    isCompatSeeking.current = startSec > 0.5;
-    compatStartOffset.current = startSec;
-    lastCompatUrlRef.current = url;
-    setError(null);
-    setCurrentTime(startSec);
-    setActiveAudio(trackIndex);
-    activeAudioRef.current = trackIndex;
-    setActivatingAudio(true);
-    setBuffering(true);
-    if (knownDuration) setDuration(knownDuration);
-    setActiveSrc(url);
-
-    if (!compatMode) {
-      compatAttempted.current = true;
-      setCompatMode(true);
-    }
-  }, [compatSrc, compatMode, knownDuration]);
-
-  const switchCompatAudio = useCallback((trackIndex: number, startAt?: number) => {
-    reloadCompatStream(trackIndex, startAt ?? currentTime);
-  }, [reloadCompatStream, currentTime]);
-
-  const ensureAudioOutput = useCallback(() => {
-    const v = videoRef.current;
-    if (!v || userMutedRef.current || volume <= 0) return;
-    v.muted = false;
-    v.volume = volume;
-    setMuted(false);
-  }, [volume]);
-
-  const ensureAudioTrackEnabled = useCallback((preferred = preferredAudioIndex) => {
-    if (compatMode || needsAudioCompat) return;
-    if (applyBrowserAudioTrack(preferred)) return;
-    setActiveAudio(preferred);
-    activeAudioRef.current = preferred;
-  }, [applyBrowserAudioTrack, preferredAudioIndex, compatMode, needsAudioCompat]);
-
-  const refreshTracks = useCallback(() => {
-    const v = videoRef.current;
-    if (!v) return;
-
-    if (!compatMode && !needsAudioCompat) {
-      const audios: AudioOption[] = [];
-      const at = (v as VideoWithAudioTracks).audioTracks;
-      if (at && at.length > 1) {
-        for (let i = 0; i < at.length; i++) {
-          const t = at[i];
-          audios.push({
-            index: i,
-            label: t.label || langLabel(t.language, `Audio ${i + 1}`),
-            language: t.language || 'und',
-          });
-          if (t.enabled) {
-            setActiveAudio(i);
-            activeAudioRef.current = i;
-          }
-        }
-      }
-      setBrowserAudioTracks(audios);
-      if (audios.length > 0) ensureAudioTrackEnabled(preferredAudioIndex);
-    }
-
-    if (!initialSubApplied.current && subtitles.length > 0) {
-      initialSubApplied.current = true;
-      if (localStorage.getItem('eyedpelis_prefer_subs') !== 'off') {
-        const esIdx = subtitles.findIndex(s => {
-          const lang = (s.language || '').toLowerCase();
-          return lang === 'es' || lang === 'spa' || lang.startsWith('es');
-        });
-        if (esIdx >= 0) {
-          applySubtitleTrack(subtitles[esIdx].index);
-        }
-      }
-    }
-  }, [applySubtitleTrack, ensureAudioTrackEnabled, preferredAudioIndex, subtitles, compatMode, needsAudioCompat]);
-
-  useEffect(() => {
-    activeAudioRef.current = activeAudio;
-  }, [activeAudio]);
+  const reveal = useCallback(() => {
+    setShowControls(true);
+    if (hideTimer.current) clearTimeout(hideTimer.current);
+    if (playing) hideTimer.current = setTimeout(() => setShowControls(false), 4000);
+  }, [playing]);
 
   const togglePlay = useCallback(() => {
     const v = videoRef.current;
     if (!v) return;
-    if (v.paused) {
-      safePlay(v).catch(() => setError('No se pudo reproducir el video'));
-    } else {
-      v.pause();
-    }
-  }, []);
-
-  const seek = useCallback((time: number) => {
-    const v = videoRef.current;
-    if (!v || !duration) return;
-    const t = Math.max(0, Math.min(time, duration));
-
-    if (compatMode && compatSrc) {
-      setCurrentTime(t);
-      pendingSeekRef.current = t;
-      if (seekDebounceRef.current) clearTimeout(seekDebounceRef.current);
-      seekDebounceRef.current = setTimeout(() => {
-        if (pendingSeekRef.current == null) return;
-        reloadCompatStream(activeAudio, pendingSeekRef.current);
-        pendingSeekRef.current = null;
-      }, 350);
-      return;
-    }
-
-    v.currentTime = t;
-  }, [duration, compatMode, compatSrc, activeAudio, reloadCompatStream]);
-
-  const seekRelative = useCallback((delta: number) => {
-    seek(currentTime + delta);
-  }, [currentTime, seek]);
-
-  const handleProgressClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    const bar = progressRef.current;
-    if (!bar || !duration) return;
-    const rect = bar.getBoundingClientRect();
-    const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    seek(ratio * duration);
-  };
-
-  const toggleFullscreen = useCallback(async () => {
-    const el = containerRef.current;
-    if (!el) return;
-    try {
-      if (!document.fullscreenElement) await el.requestFullscreen();
-      else await document.exitFullscreen();
-    } catch { /* ignore */ }
+    v.paused ? tryPlay(v) : v.pause();
   }, []);
 
   const toggleMute = useCallback(() => {
     const v = videoRef.current;
     if (!v) return;
     v.muted = !v.muted;
-    userMutedRef.current = v.muted;
     setMuted(v.muted);
   }, []);
 
-  const changeVolume = (val: number) => {
+  const changeVol = (val: number) => {
     const v = videoRef.current;
     if (!v) return;
-    const clamped = Math.max(0, Math.min(1, val));
-    v.volume = clamped;
-    if (clamped > 0) {
-      v.muted = false;
-      userMutedRef.current = false;
-      setMuted(false);
-    } else {
-      v.muted = true;
-      userMutedRef.current = true;
-      setMuted(true);
-    }
-    setVolume(clamped);
-    localStorage.setItem('eyedpelis_volume', String(clamped));
+    const c = Math.max(0, Math.min(1, val));
+    v.volume = c;
+    v.muted = c === 0;
+    setVolume(c);
+    setMuted(c === 0);
+    localStorage.setItem('eyedpelis_volume', String(c));
   };
 
-  const switchToCompatStream = useCallback((audioIndex = preferredAudioIndex, startAt = 0) => {
-    reloadCompatStream(audioIndex, startAt);
-  }, [reloadCompatStream, preferredAudioIndex]);
-
-  const selectSubtitle = (trackIndex: number) => {
-    if (trackIndex === -1) {
-      setActiveSub(-1);
-      setSubtitleCues([]);
-      setActiveCueText(null);
-      setSubtitleLoadError(null);
-      localStorage.setItem('eyedpelis_prefer_subs', 'off');
-    } else {
-      applySubtitleTrack(trackIndex);
-      loadSubtitleCues(trackIndex);
-      localStorage.setItem('eyedpelis_prefer_subs', 'on');
-    }
-    setShowLangMenu(false);
-  };
-
-  const selectAudio = (trackIndex: number) => {
-    if (trackIndex === activeAudio) {
-      setShowLangMenu(false);
-      return;
-    }
-    if (compatMode || needsAudioCompat) {
-      if (compatSrc) switchCompatAudio(trackIndex, currentTime);
-      setShowLangMenu(false);
-      return;
-    }
-    if (applyBrowserAudioTrack(trackIndex)) {
-      setShowLangMenu(false);
-      return;
-    }
-    if (compatSrc) switchCompatAudio(trackIndex, currentTime);
-    setShowLangMenu(false);
-  };
-
-  useEffect(() => {
-    if (activeSub >= 0) {
-      loadSubtitleCues(activeSub);
-    } else {
-      setSubtitleCues([]);
-      setActiveCueText(null);
-    }
-  }, [activeSub, loadSubtitleCues]);
-
-  useEffect(() => {
-    if (activeSub < 0 || subtitleCues.length === 0) {
-      setActiveCueText(null);
-      return;
-    }
-    const cue = findActiveCue(subtitleCues, currentTime);
-    setActiveCueText(cue?.text ?? null);
-  }, [currentTime, activeSub, subtitleCues]);
-
-  useEffect(() => {
-    cuesCache.current.clear();
-  }, [subtitles]);
-
-  useEffect(() => {
-    const v = videoRef.current;
-    if (!v) return;
-    v.volume = volume;
-    v.playbackRate = playbackRate;
-  }, [volume, playbackRate]);
-
-  useEffect(() => () => {
-    if (seekDebounceRef.current) clearTimeout(seekDebounceRef.current);
+  const toggleFs = useCallback(async () => {
+    const el = containerRef.current;
+    if (!el) return;
+    try {
+      document.fullscreenElement ? await document.exitFullscreen() : await el.requestFullscreen();
+    } catch { /* ignore */ }
   }, []);
 
-  useEffect(() => {
-    const v = videoRef.current;
-    if (!v) return;
-    if (!srcInitializedRef.current) {
-      srcInitializedRef.current = true;
-      return;
-    }
-    setError(null);
-    setBuffering(true);
-    v.load();
-  }, [activeSrc]);
+  const btn = 'p-2.5 rounded-xl hover:bg-white/15 active:bg-white/20 transition-all hover:scale-105 active:scale-95';
 
+  /* ── Efectos ── */
+
+  // Reset al cambiar de película
   useEffect(() => {
-    srcInitializedRef.current = false;
-    initialSubApplied.current = false;
-    setBrowserAudioTracks([]);
-    setActiveSub(-1);
-    setActiveAudio(preferredAudioIndex);
-    setActivatingAudio(false);
-    setSubtitleCues([]);
-    setActiveCueText(null);
+    subsInit.current = false;
     cuesCache.current.clear();
-    compatStartOffset.current = 0;
-    lastCompatUrlRef.current = '';
-    pendingSeekRef.current = null;
-    if (seekDebounceRef.current) clearTimeout(seekDebounceRef.current);
-
-    if (needsAudioCompat && compatSrc) {
-      compatAttempted.current = true;
-      setCompatMode(true);
-      const url = buildCompatUrl(compatSrc, preferredAudioIndex, 0);
-      lastCompatUrlRef.current = url;
-      setActiveSrc(url);
-    } else {
-      compatAttempted.current = false;
-      setCompatMode(false);
-      setActiveSrc(src);
-    }
-
+    setActiveSub(-1);
+    setSubtitleCues([]);
+    setActiveCue(null);
+    setError(null);
+    setPlayback(initialPlayback(src, compatSrc, needsAudioCompat, preferredAudioIndex));
     if (knownDuration) setDuration(knownDuration);
   }, [src, compatSrc, needsAudioCompat, preferredAudioIndex, knownDuration]);
 
+  // Subtítulos por defecto (español)
   useEffect(() => {
-    if (knownDuration && knownDuration > 0) setDuration(knownDuration);
-  }, [knownDuration]);
+    if (subsInit.current || subtitles.length === 0) return;
+    subsInit.current = true;
+    if (localStorage.getItem('eyedpelis_prefer_subs') === 'off') return;
+    const es = subtitles.find(s => {
+      const l = (s.language || '').toLowerCase();
+      return l.startsWith('es') || l === 'spa';
+    });
+    if (es) { setActiveSub(es.index); loadSubs(es.index); }
+  }, [subtitles, loadSubs]);
+
+  // Sincronizar cue activo
+  useEffect(() => {
+    if (activeSub < 0 || subtitleCues.length === 0) { setActiveCue(null); return; }
+    setActiveCue(findActiveCue(subtitleCues, currentTime)?.text ?? null);
+  }, [currentTime, activeSub, subtitleCues]);
+
+  // Volumen / velocidad
+  useEffect(() => {
+    const v = videoRef.current;
+    if (v) { v.volume = volume; v.playbackRate = playbackRate; v.muted = muted; }
+  }, [volume, playbackRate, muted]);
+
+  // Teclado
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement) return;
+      switch (e.key) {
+        case ' ': case 'k': e.preventDefault(); togglePlay(); break;
+        case 'ArrowLeft': e.preventDefault(); seekTo(currentTime - 10); break;
+        case 'ArrowRight': e.preventDefault(); seekTo(currentTime + 10); break;
+        case 'ArrowUp': e.preventDefault(); changeVol(volume + 0.1); break;
+        case 'ArrowDown': e.preventDefault(); changeVol(volume - 0.1); break;
+        case 'f': e.preventDefault(); toggleFs(); break;
+        case 'm': e.preventDefault(); toggleMute(); break;
+        case 'c': e.preventDefault(); setShowLangMenu(s => !s); break;
+        case 'Escape': setShowLangMenu(false); setShowSettings(false); break;
+      }
+      reveal();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [togglePlay, seekTo, currentTime, volume, toggleFs, toggleMute, reveal]);
 
   useEffect(() => {
-    const onFs = () => setIsFullscreen(!!document.fullscreenElement);
+    const onFs = () => setFullscreen(!!document.fullscreenElement);
     document.addEventListener('fullscreenchange', onFs);
     return () => document.removeEventListener('fullscreenchange', onFs);
   }, []);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
-      switch (e.key) {
-        case ' ':
-        case 'k':
-          e.preventDefault();
-          togglePlay();
-          break;
-        case 'ArrowLeft':
-          e.preventDefault();
-          seekRelative(-10);
-          break;
-        case 'ArrowRight':
-          e.preventDefault();
-          seekRelative(10);
-          break;
-        case 'ArrowUp':
-          e.preventDefault();
-          changeVolume(volume + 0.1);
-          break;
-        case 'ArrowDown':
-          e.preventDefault();
-          changeVolume(volume - 0.1);
-          break;
-        case 'f':
-          e.preventDefault();
-          toggleFullscreen();
-          break;
-        case 'm':
-          e.preventDefault();
-          toggleMute();
-          break;
-        case 'c':
-          e.preventDefault();
-          setShowLangMenu(s => !s);
-          setShowSettings(false);
-          break;
-        case 'Escape':
-          if (showLangMenu) setShowLangMenu(false);
-          else if (showSettings) setShowSettings(false);
-          break;
-      }
-      revealControls();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [togglePlay, seekRelative, toggleFullscreen, toggleMute, volume, revealControls, showLangMenu, showSettings]);
+  useEffect(() => () => {
+    if (hideTimer.current) clearTimeout(hideTimer.current);
+    if (seekTimer.current) clearTimeout(seekTimer.current);
+  }, []);
 
-  useEffect(() => {
-    revealControls();
-    return () => { if (hideTimer.current) clearTimeout(hideTimer.current); };
-  }, [playing, revealControls]);
-
-  const controlBtn = 'p-2.5 rounded-xl hover:bg-white/15 active:bg-white/20 transition-all duration-200 hover:scale-105 active:scale-95';
+  /* ── Render ── */
 
   return (
-    <div
-      ref={containerRef}
-      className="relative w-full h-screen bg-black overflow-hidden select-none"
-      onMouseMove={revealControls}
-      onMouseLeave={() => playing && setShowControls(false)}
-      onClick={(e) => {
-        if ((e.target as HTMLElement).closest('[data-controls]')) return;
-        togglePlay();
-        revealControls();
-      }}
-    >
+    <div ref={containerRef} className="relative w-full h-screen bg-black overflow-hidden select-none"
+      onMouseMove={reveal} onMouseLeave={() => playing && setShowControls(false)}
+      onClick={e => { if (!(e.target as HTMLElement).closest('[data-controls]')) { togglePlay(); reveal(); } }}>
+
       <video
+        key={playback.src}
         ref={videoRef}
-        src={activeSrc}
+        src={playback.src}
         poster={poster}
         className="w-full h-full object-contain"
         playsInline
         autoPlay
-        onPlay={() => {
-          setPlaying(true);
-          setBuffering(false);
-          ensureAudioOutput();
-        }}
+        onPlay={() => { setPlaying(true); setBuffering(false); setPreparing(false); }}
         onPause={() => { setPlaying(false); setShowControls(true); }}
+        onWaiting={() => setBuffering(true)}
+        onCanPlay={() => { setBuffering(false); setPreparing(false); tryPlay(videoRef.current!); }}
         onTimeUpdate={() => {
           const v = videoRef.current;
           if (!v) return;
-          const t = compatMode
-            ? compatStartOffset.current + v.currentTime
-            : v.currentTime;
-          setCurrentTime(t);
+          const abs = isTranscode ? playback.offset + v.currentTime : v.currentTime;
+          setCurrentTime(abs);
           if (v.buffered.length > 0) {
-            const bufEnd = compatMode
-              ? compatStartOffset.current + v.buffered.end(v.buffered.length - 1)
-              : v.buffered.end(v.buffered.length - 1);
-            setBuffered(bufEnd);
+            const end = v.buffered.end(v.buffered.length - 1);
+            setBuffered(isTranscode ? playback.offset + end : end);
           }
-          if (compatMode && knownDuration) {
-            setDuration(knownDuration);
-          } else if (knownDuration && v.duration > 0 && v.duration < knownDuration * 0.5) {
-            setDuration(knownDuration);
-          }
+          if (knownDuration && knownDuration > 0) setDuration(knownDuration);
         }}
         onLoadedMetadata={() => {
-          const v = videoRef.current;
-          if (v) {
-            setDuration(resolveDuration(v.duration, knownDuration, v.currentTime));
-            if (isCompatSeeking.current) {
-              isCompatSeeking.current = false;
-            } else if (resumeTimeRef.current > 0) {
-              v.currentTime = resumeTimeRef.current;
-              resumeTimeRef.current = 0;
-            }
-          }
-          refreshTracks();
-        }}
-        onLoadedData={() => refreshTracks()}
-        onWaiting={() => setBuffering(true)}
-        onCanPlay={() => {
-          setBuffering(false);
-          setActivatingAudio(false);
-          setError(null);
-          ensureAudioOutput();
-          if (!compatMode && !needsAudioCompat) {
-            ensureAudioTrackEnabled(preferredAudioIndex);
-          }
-          const v = videoRef.current;
-          if (v) {
-            if (compatMode && knownDuration) {
-              setDuration(knownDuration);
-            } else if (knownDuration) {
-              setDuration(resolveDuration(v.duration, knownDuration, v.currentTime));
-            }
-            if (v.paused && !document.hidden) {
-              safePlay(v).catch(() => { /* autoplay bloqueado o interrumpido */ });
-            }
-          }
+          if (knownDuration && knownDuration > 0) setDuration(knownDuration);
+          else if (videoRef.current) setDuration(videoRef.current.duration || 0);
         }}
         onError={() => {
-          if (!compatAttempted.current && compatSrc && needsAudioCompat) {
-            switchToCompatStream(preferredAudioIndex, currentTime);
+          if (playback.engine === 'direct' && compatSrc && needsAudioCompat) {
+            goTranscode(preferredAudioIndex, 0);
             return;
           }
-          setError('Error al cargar el video. Comprueba el formato o la conexión.');
+          setError('No se pudo reproducir el video.');
         }}
       />
 
-      {activeCueText && activeSub >= 0 && (
-        <div className="absolute bottom-28 md:bottom-32 left-0 right-0 z-10 flex justify-center px-4 md:px-10 pointer-events-none">
+      {/* Subtítulos */}
+      {activeCue && (
+        <div className="absolute bottom-28 md:bottom-32 left-0 right-0 z-10 flex justify-center px-4 pointer-events-none">
           <p className="text-center text-white text-base md:text-xl font-medium leading-relaxed max-w-4xl bg-black/85 px-4 py-2.5 rounded-xl shadow-2xl whitespace-pre-line border border-white/10">
-            {activeCueText}
+            {activeCue}
           </p>
         </div>
       )}
-
-      {loadingSubs && activeSub >= 0 && !activeCueText && (
-        <div className="absolute bottom-28 left-1/2 -translate-x-1/2 z-10 text-xs text-white/50 pointer-events-none">
-          Cargando subtítulos…
-        </div>
+      {loadingSubs && activeSub >= 0 && !activeCue && (
+        <div className="absolute bottom-28 left-1/2 -translate-x-1/2 z-10 text-xs text-white/50">Cargando subtítulos…</div>
       )}
 
-      {subtitleLoadError && activeSub >= 0 && !loadingSubs && (
-        <div className="absolute bottom-28 left-1/2 -translate-x-1/2 z-10 text-xs text-amber-400/90 pointer-events-none bg-black/70 px-3 py-1 rounded-lg">
-          {subtitleLoadError}
-        </div>
-      )}
-
-      {activatingAudio && !error && (
-        <div className="absolute top-20 left-1/2 -translate-x-1/2 z-30 px-3 py-1.5 bg-black/70 backdrop-blur-sm rounded-lg text-white/70 text-xs pointer-events-none">
-          Preparando audio…
+      {preparing && !error && (
+        <div className="absolute top-20 left-1/2 -translate-x-1/2 z-30 px-3 py-1.5 bg-black/70 backdrop-blur-sm rounded-lg text-white/70 text-xs">
+          Preparando stream…
         </div>
       )}
 
@@ -826,183 +457,114 @@ export default function VideoPlayer({
       )}
 
       {error && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-black/90">
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-black/90 z-30">
           <p className="text-red-400">{error}</p>
-          <button type="button" onClick={onBack} className="btn-secondary">Volver</button>
+          <div className="flex gap-3">
+            {compatSrc && playback.engine === 'direct' && (
+              <button type="button" onClick={() => goTranscode(preferredAudioIndex, 0)} className="btn-primary">
+                Reproducir con audio compatible
+              </button>
+            )}
+            <button type="button" onClick={onBack} className="btn-secondary">Volver</button>
+          </div>
         </div>
       )}
 
-      {/* Overlays */}
+      {/* Gradientes */}
       <div className={`absolute inset-0 pointer-events-none transition-opacity duration-500 ${showControls ? 'opacity-100' : 'opacity-0'}`}>
-        <div className="absolute inset-x-0 top-0 h-28 bg-gradient-to-b from-black/90 via-black/40 to-transparent" />
+        <div className="absolute inset-x-0 top-0 h-28 bg-gradient-to-b from-black/90 to-transparent" />
         <div className="absolute inset-x-0 bottom-0 h-48 bg-gradient-to-t from-black via-black/80 to-transparent" />
       </div>
 
-      {/* Top bar */}
-      <div
-        data-controls
-        className={`absolute top-0 left-0 right-0 z-20 flex items-center gap-3 px-5 md:px-8 py-5 transition-all duration-500 ${
-          showControls ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4 pointer-events-none'
-        }`}
-      >
-        <button
-          type="button"
-          onClick={(e) => { e.stopPropagation(); onBack(); }}
-          className={`${controlBtn} bg-black/30 backdrop-blur-sm`}
-          aria-label="Volver"
-        >
+      {/* Barra superior */}
+      <div data-controls className={`absolute top-0 inset-x-0 z-20 flex items-center gap-3 px-5 md:px-8 py-5 transition-all duration-500 ${showControls ? 'opacity-100' : 'opacity-0 -translate-y-4 pointer-events-none'}`}>
+        <button type="button" onClick={e => { e.stopPropagation(); onBack(); }} className={`${btn} bg-black/30 backdrop-blur-sm`} aria-label="Volver">
           <ArrowLeft size={22} />
         </button>
         <div className="flex-1 min-w-0">
-          <h1 className="text-base md:text-xl font-bold truncate drop-shadow-lg">{title}</h1>
-          {playing && (
-            <p className="text-xs text-white/50 mt-0.5 hidden sm:block">Eyedpelis</p>
-          )}
+          <h1 className="text-base md:text-xl font-bold truncate">{title}</h1>
         </div>
       </div>
 
       {!playing && !buffering && !error && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <div className="bg-black/50 backdrop-blur-md rounded-full p-6 ring-1 ring-white/20 shadow-2xl">
+          <div className="bg-black/50 backdrop-blur-md rounded-full p-6 ring-1 ring-white/20">
             <Play size={44} fill="white" className="text-white ml-1" />
           </div>
         </div>
       )}
 
-      {/* Bottom controls */}
-      <div
-        data-controls
-        className={`absolute bottom-0 left-0 right-0 z-20 transition-all duration-500 ${
-          showControls ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-6 pointer-events-none'
-        }`}
-        onClick={e => e.stopPropagation()}
-      >
+      {/* Controles inferiores */}
+      <div data-controls className={`absolute bottom-0 inset-x-0 z-20 transition-all duration-500 ${showControls ? 'opacity-100' : 'opacity-0 translate-y-6 pointer-events-none'}`} onClick={e => e.stopPropagation()}>
         <div className="px-4 md:px-8 pb-6 pt-2">
-          {/* Progress */}
-          <div
-            ref={progressRef}
-            className="group relative h-1 mb-5 cursor-pointer rounded-full bg-white/15 hover:h-1.5 transition-all"
-            onClick={handleProgressClick}
-          >
-            <div className="absolute inset-y-0 left-0 bg-white/25 rounded-full transition-all" style={{ width: `${bufferProgress}%` }} />
-            <div
-              className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-accent to-accent-glow transition-all"
-              style={{ width: `${progress}%` }}
-            />
-            <div
-              className="absolute top-1/2 -translate-y-1/2 w-4 h-4 bg-white rounded-full shadow-lg ring-2 ring-accent/50 opacity-0 group-hover:opacity-100 transition-opacity -ml-2"
-              style={{ left: `${progress}%` }}
-            />
+          <div ref={progressRef} className="group relative h-1 mb-5 cursor-pointer rounded-full bg-white/15 hover:h-1.5 transition-all"
+            onClick={e => {
+              const bar = progressRef.current;
+              if (!bar || !duration) return;
+              const r = (e.clientX - bar.getBoundingClientRect().left) / bar.clientWidth;
+              seekTo(Math.max(0, Math.min(1, r)) * duration);
+            }}>
+            <div className="absolute inset-y-0 left-0 bg-white/25 rounded-full" style={{ width: `${bufPct}%` }} />
+            <div className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-accent to-accent-glow" style={{ width: `${progress}%` }} />
+            <div className="absolute top-1/2 -translate-y-1/2 w-4 h-4 bg-white rounded-full shadow-lg opacity-0 group-hover:opacity-100 -ml-2 transition-opacity" style={{ left: `${progress}%` }} />
           </div>
 
-          <div className="flex items-center gap-2 md:gap-4 bg-black/40 backdrop-blur-md rounded-2xl px-3 py-2 md:px-4 md:py-2.5 border border-white/10">
-            {/* Play cluster */}
+          <div className="flex items-center gap-2 md:gap-4 bg-black/40 backdrop-blur-md rounded-2xl px-3 py-2 md:px-4 border border-white/10">
             <div className="flex items-center">
-              <button type="button" onClick={() => seekRelative(-10)} className={`${controlBtn} hidden sm:flex`} aria-label="Retroceder 10s">
-                <SkipBack size={20} />
-              </button>
-              <button type="button" onClick={togglePlay} className={`${controlBtn} mx-0.5`} aria-label={playing ? 'Pausar' : 'Reproducir'}>
+              <button type="button" onClick={() => seekTo(currentTime - 10)} className={`${btn} hidden sm:flex`}><SkipBack size={20} /></button>
+              <button type="button" onClick={togglePlay} className={`${btn} mx-0.5`}>
                 {playing ? <Pause size={24} fill="white" /> : <Play size={24} fill="white" />}
               </button>
-              <button type="button" onClick={() => seekRelative(10)} className={`${controlBtn} hidden sm:flex`} aria-label="Avanzar 10s">
-                <SkipForward size={20} />
-              </button>
+              <button type="button" onClick={() => seekTo(currentTime + 10)} className={`${btn} hidden sm:flex`}><SkipForward size={20} /></button>
             </div>
 
-            <span className="text-xs md:text-sm text-white/80 tabular-nums font-medium min-w-[88px] md:min-w-[110px]">
-              {formatTime(currentTime)}
-              <span className="text-white/40 mx-1">/</span>
-              {formatTime(duration)}
+            <span className="text-xs md:text-sm text-white/80 tabular-nums min-w-[88px]">
+              {formatTime(currentTime)}<span className="text-white/40 mx-1">/</span>{formatTime(duration)}
             </span>
 
             <div className="flex-1" />
 
-            {/* Audio & subtitles — always visible */}
             <div className="relative">
-              <button
-                type="button"
-                onClick={() => { setShowLangMenu(s => !s); setShowSettings(false); }}
-                className={`${controlBtn} flex items-center gap-2 ${
-                  tracksActive ? 'text-accent-glow bg-accent/10 ring-1 ring-accent/30' : ''
-                }`}
-                aria-label="Audio y subtítulos"
-                title="Audio y subtítulos (C)"
-              >
+              <button type="button" onClick={() => { setShowLangMenu(s => !s); setShowSettings(false); }}
+                className={`${btn} flex items-center gap-2 ${(activeSub >= 0 || audioOptions.length > 1) ? 'text-accent-glow bg-accent/10 ring-1 ring-accent/30' : ''}`}>
                 <Languages size={20} />
                 <span className="hidden md:inline text-xs font-medium">Audio</span>
               </button>
-              <TrackMenu
-                open={showLangMenu}
-                onClose={() => setShowLangMenu(false)}
-                audioOptions={audioOptions}
-                subtitleOptions={subtitleOptions}
-                activeAudio={activeAudio}
-                activeSub={activeSub}
-                onSelectAudio={selectAudio}
-                onSelectSubtitle={selectSubtitle}
-                canSwitchAudio={canSwitchAudio}
-                needsAudioCompat={needsAudioCompat}
-                compatMode={compatMode}
-              />
+              <TrackMenu open={showLangMenu} onClose={() => setShowLangMenu(false)}
+                audioOptions={audioOptions} subtitleOptions={subtitleOptions}
+                activeAudio={playback.audioIndex} activeSub={activeSub}
+                onAudio={selectAudio} onSub={selectSub} />
             </div>
 
-            {/* Quick subtitle toggle */}
             {subtitleOptions.length > 0 && (
-              <button
-                type="button"
-                onClick={() => {
-                  if (activeSub >= 0) selectSubtitle(-1);
-                  else selectSubtitle(subtitleOptions[0].index);
-                }}
-                className={`${controlBtn} ${activeSub >= 0 ? 'text-accent-glow bg-accent/10 ring-1 ring-accent/30' : ''}`}
-                aria-label="Alternar subtítulos"
-                title="Alternar subtítulos"
-              >
+              <button type="button" onClick={() => activeSub >= 0 ? selectSub(-1) : selectSub(subtitleOptions[0].index)}
+                className={`${btn} ${activeSub >= 0 ? 'text-accent-glow bg-accent/10 ring-1 ring-accent/30' : ''}`}>
                 <Subtitles size={20} />
               </button>
             )}
 
-            {/* Volume */}
             <div className="flex items-center gap-1 group/vol">
-              <button type="button" onClick={toggleMute} className={controlBtn} aria-label={muted ? 'Activar sonido' : 'Silenciar'}>
+              <button type="button" onClick={toggleMute} className={btn}>
                 {muted || volume === 0 ? <VolumeX size={20} /> : <Volume2 size={20} />}
               </button>
-              <input
-                type="range"
-                min={0}
-                max={1}
-                step={0.05}
-                value={muted ? 0 : volume}
-                onChange={e => changeVolume(parseFloat(e.target.value))}
-                className="w-0 group-hover/vol:w-24 transition-all duration-300 accent-accent hidden md:block h-1 cursor-pointer"
-              />
+              <input type="range" min={0} max={1} step={0.05} value={muted ? 0 : volume}
+                onChange={e => changeVol(parseFloat(e.target.value))}
+                className="w-0 group-hover/vol:w-24 transition-all accent-accent hidden md:block h-1 cursor-pointer" />
             </div>
 
-            {/* Settings */}
             <div className="relative">
-              <button
-                type="button"
-                onClick={() => { setShowSettings(s => !s); setShowLangMenu(false); }}
-                className={controlBtn}
-                aria-label="Ajustes"
-              >
+              <button type="button" onClick={() => { setShowSettings(s => !s); setShowLangMenu(false); }} className={btn}>
                 <Settings size={20} />
               </button>
               {showSettings && (
                 <>
                   <div className="fixed inset-0 z-40" onClick={() => setShowSettings(false)} />
-                  <div className="absolute right-0 bottom-full mb-3 z-50 bg-black/95 backdrop-blur-xl border border-white/10 rounded-xl py-2 min-w-[150px] shadow-2xl">
-                    <p className="px-4 py-1.5 text-[11px] font-semibold text-gray-400 uppercase tracking-widest">Velocidad</p>
-                    {[0.5, 0.75, 1, 1.25, 1.5, 2].map(rate => (
-                      <button
-                        key={rate}
-                        type="button"
-                        className={`w-full text-left px-4 py-2.5 text-sm hover:bg-white/10 transition-colors ${
-                          playbackRate === rate ? 'text-accent-glow font-medium' : ''
-                        }`}
-                        onClick={() => { setPlaybackRate(rate); setShowSettings(false); }}
-                      >
-                        {rate === 1 ? 'Normal' : `${rate}x`}
+                  <div className="absolute right-0 bottom-full mb-3 z-50 bg-black/95 border border-white/10 rounded-xl py-2 min-w-[150px] shadow-2xl">
+                    <p className="px-4 py-1.5 text-[11px] font-semibold text-gray-400 uppercase">Velocidad</p>
+                    {[0.5, 0.75, 1, 1.25, 1.5, 2].map(r => (
+                      <button key={r} type="button" onClick={() => { setPlaybackRate(r); setShowSettings(false); }}
+                        className={`w-full text-left px-4 py-2.5 text-sm hover:bg-white/10 ${playbackRate === r ? 'text-accent-glow font-medium' : ''}`}>
+                        {r === 1 ? 'Normal' : `${r}x`}
                       </button>
                     ))}
                   </div>
@@ -1010,8 +572,8 @@ export default function VideoPlayer({
               )}
             </div>
 
-            <button type="button" onClick={toggleFullscreen} className={controlBtn} aria-label="Pantalla completa">
-              {isFullscreen ? <Minimize size={20} /> : <Maximize size={20} />}
+            <button type="button" onClick={toggleFs} className={btn}>
+              {fullscreen ? <Minimize size={20} /> : <Maximize size={20} />}
             </button>
           </div>
         </div>
