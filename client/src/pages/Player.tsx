@@ -12,6 +12,9 @@ export default function Player() {
   const [useCompat, setUseCompat] = useState(false);
   const [audioWarning, setAudioWarning] = useState<string | null>(null);
   const [preferredAudioIndex, setPreferredAudioIndex] = useState(0);
+  const [probeAudioTracks, setProbeAudioTracks] = useState<Array<{
+    index: number; codec: string; codecLabel: string; language: string;
+  }>>([]);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
@@ -25,6 +28,7 @@ export default function Player() {
       setMedia(item);
 
       if (streamInfo?.probe) {
+        setProbeAudioTracks(streamInfo.probe.audioTracks);
         setPreferredAudioIndex(streamInfo.probe.recommendedAudioIndex);
         if (!streamInfo.probe.browserFriendlyAudio) {
           setUseCompat(true);
@@ -83,6 +87,7 @@ export default function Player() {
       title={title}
       poster={posterUrl(media.poster_path ?? null)}
       subtitles={subtitles}
+      probeAudioTracks={probeAudioTracks}
       useCompat={useCompat}
       audioWarning={audioWarning}
       preferredAudioIndex={preferredAudioIndex}
