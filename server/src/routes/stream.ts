@@ -105,6 +105,8 @@ router.get('/:id/compat', async (req, res) => {
     '-map', `0:a:${audioIdx}?`,
     '-c:v', 'copy',
     '-c:a', 'aac', '-b:a', '192k', '-ac', '2',
+    '-avoid_negative_ts', 'make_zero',
+    '-max_muxing_queue_size', '1024',
     '-f', 'mp4',
     '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
     'pipe:1',
