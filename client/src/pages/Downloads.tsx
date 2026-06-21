@@ -78,9 +78,16 @@ export default function Downloads() {
       </div>
 
       {downloads.length === 0 ? (
-        <div className="text-center py-20 text-gray-400">
+        <div className="text-center py-20 text-gray-400 max-w-lg mx-auto">
           <DownloadIcon size={48} className="mx-auto mb-4 opacity-50" />
-          <p>No hay descargas. Busca contenido en la sección Buscar.</p>
+          <p className="mb-4">No hay descargas activas.</p>
+          <div className="text-left text-sm bg-surface-card border border-purple-500/15 rounded-xl p-5 space-y-2">
+            <p className="font-semibold text-white">¿Cómo descargar?</p>
+            <p>1. Ve a <strong className="text-accent">Buscar</strong> y encuentra una película o serie en TMDB.</p>
+            <p>2. Pulsa <strong className="text-accent">Descargar</strong> y pega un enlace <strong>magnet</strong> o <strong>URL directa</strong> (Eyedpelis no baja de TMDB solo).</p>
+            <p>3. Cuando termine, elige si va a <strong>Películas</strong> o <strong>Series</strong>.</p>
+            <p className="text-xs text-gray-500 pt-2">Para torrents necesitas qBittorrent configurado en Configuración.</p>
+          </div>
         </div>
       ) : (
         <div className="space-y-3">

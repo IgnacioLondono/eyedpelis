@@ -21,6 +21,14 @@ export interface TmdbDetails {
   spoken_languages?: Array<{ iso_639_1: string; name: string; english_name: string }>;
   genres?: Array<{ id: number; name: string }>;
   production_countries?: Array<{ iso_3166_1: string; name: string }>;
+  seasons?: Array<{
+    season_number: number;
+    name?: string;
+    poster_path?: string | null;
+    episode_count?: number;
+    air_date?: string;
+    overview?: string;
+  }>;
 }
 
 export const LANGUAGE_NAMES: Record<string, string> = {

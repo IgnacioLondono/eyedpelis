@@ -31,10 +31,10 @@ router.get('/movies', (req, res) => {
   }
 
   const orderMap: Record<string, (a: MediaItem, b: MediaItem) => number> = {
-    title: (a, b) => a.title.localeCompare(b.title),
+    title: (a, b) => (a.title || '').localeCompare(b.title || '', 'es'),
     date: (a, b) => (b.release_date || '').localeCompare(a.release_date || ''),
     rating: (a, b) => (b.vote_average || 0) - (a.vote_average || 0),
-    recent: (a, b) => b.created_at.localeCompare(a.created_at),
+    recent: (a, b) => (b.created_at || '').localeCompare(a.created_at || ''),
   };
   items.sort(orderMap[sort as string] || orderMap.title);
 

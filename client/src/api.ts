@@ -51,8 +51,11 @@ export const api = {
     }),
   getStats: () => request<import('./types').LibraryStats>('/library/stats'),
   getMovies: (params?: { search?: string; sort?: string }) => {
-    const q = new URLSearchParams(params as Record<string, string>).toString();
-    return request<import('./types').MediaItem[]>(`/library/movies?${q}`);
+    const q = new URLSearchParams();
+    if (params?.search) q.set('search', params.search);
+    if (params?.sort) q.set('sort', params.sort);
+    const qs = q.toString();
+    return request<import('./types').MediaItem[]>(`/library/movies${qs ? `?${qs}` : ''}`);
   },
   getSeries: (search?: string) => {
     const q = search ? `?search=${encodeURIComponent(search)}` : '';

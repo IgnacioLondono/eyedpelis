@@ -153,10 +153,27 @@ export async function enrichFromTmdb(
   year?: number,
 ): Promise<TmdbSearchResult | null> {
   try {
-    if (type === 'movie') {
-      return await searchMovie(title, year);
+    const search = type === 'movie' ? searchMovie : searchSeries;
+
+    let result = await search(title, year);
+    if (result?.poster_path) return result;
+
+    const withoutParens = title.replace(/\s*\([^)]*\)\s*$/, '').trim();
+    if (withoutParens && withoutParens !== title) {
+      result = await search(withoutParens, year);
+      if (result?.poster_path) return result;
     }
-    return await searchSeries(title, year);
+
+    if (year) {
+      result = await search(withoutParens || title);
+      if (result?.poster_path) return result;
+    }
+
+    const multi = await searchMulti(withoutParens || title);
+    const match = multi.find(r => r.type === type && r.poster_path);
+    if (match) return match;
+
+    return result ?? multi.find(r => r.type === type) ?? null;
   } catch {
     return null;
   }

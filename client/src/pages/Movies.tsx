@@ -9,12 +9,18 @@ export default function Movies() {
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState('title');
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     setLoading(true);
+    setError(null);
     api.getMovies({ search: search || undefined, sort })
       .then(setMovies)
-      .catch(console.error)
+      .catch(err => {
+        console.error(err);
+        setError(err instanceof Error ? err.message : 'Error al cargar películas');
+        setMovies([]);
+      })
       .finally(() => setLoading(false));
   }, [search, sort]);
 
@@ -52,8 +58,20 @@ export default function Movies() {
             <div key={i} className="aspect-[2/3] rounded-xl shimmer-bg" />
           ))}
         </div>
+      ) : error ? (
+        <div className="text-center py-20">
+          <p className="text-red-400 mb-4">{error}</p>
+          <button type="button" onClick={() => setSort('recent')} className="btn-secondary">Reintentar</button>
+        </div>
       ) : movies.length === 0 ? (
-        <p className="text-gray-400 text-center py-20">No hay películas en tu biblioteca.</p>
+        <div className="text-center py-20 text-gray-400">
+          <p>No hay películas en tu biblioteca.</p>
+          {search && (
+            <button type="button" onClick={() => setSearch('')} className="text-accent hover:underline mt-3 text-sm">
+              Limpiar búsqueda
+            </button>
+          )}
+        </div>
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
           {movies.map(m => <MediaCard key={m.id} item={m} libraryId={m.id} showPlay />)}
