@@ -1,11 +1,20 @@
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import {
   insertDownload, getDownloadById, getAllDownloads,
   updateDownloadRecord, deleteDownloadRecord,
 } from '../db/database.js';
-import { getSettings, isMediaReadOnly } from '../config.js';
+import { getSettings } from '../config.js';
 import type { DownloadItem, MediaType } from '../types.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const INCOMING_DIR = path.join(__dirname, '../../data/incoming');
+
+function ensureIncomingDir() {
+  if (!fs.existsSync(INCOMING_DIR)) fs.mkdirSync(INCOMING_DIR, { recursive: true });
+  return INCOMING_DIR;
+}
 
 export async function addToQueue(params: {
   tmdb_id: number;
@@ -37,14 +46,16 @@ export function updateDownload(id: number, fields: Partial<DownloadItem>) {
 }
 
 export function deleteDownload(id: number) {
+  const item = getDownloadById(id);
+  if (item?.download_path && item.status === 'awaiting_folder' && fs.existsSync(item.download_path)) {
+    try { fs.unlinkSync(item.download_path); } catch { /* ignore */ }
+  }
   deleteDownloadRecord(id);
 }
 
 export { getDownloadById, getAllDownloads };
 
 export async function processQueue() {
-  if (isMediaReadOnly()) return;
-
   const queued = getAllDownloads().filter(d => d.status === 'queued').slice(0, 3);
 
   for (const item of queued) {
@@ -68,16 +79,10 @@ export async function processQueue() {
 async function downloadDirect(item: DownloadItem) {
   updateDownload(item.id, { status: 'downloading', progress: 0 });
 
-  const settings = getSettings();
-  const destDir = item.type === 'movie'
-    ? path.join(settings.media_path, settings.movies_path)
-    : path.join(settings.media_path, settings.series_path);
-
-  if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
-
-  const safeName = item.title.replace(/[^a-zA-Z0-9áéíóúñÁÉÍÓÚÑ\s.-]/g, '').trim();
+  ensureIncomingDir();
+  const safeName = item.title.replace(/[^a-zA-Z0-9áéíóúñÁÉÍÓÚÑ\s.-]/g, '').trim() || 'descarga';
   const ext = path.extname(new URL(item.direct_url!).pathname) || '.mp4';
-  const destPath = path.join(destDir, `${safeName}${ext}`);
+  const destPath = path.join(INCOMING_DIR, `${item.id}_${safeName}${ext}`);
 
   const response = await fetch(item.direct_url!);
   if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`);
@@ -101,7 +106,7 @@ async function downloadDirect(item: DownloadItem) {
   fs.writeFileSync(destPath, buffer);
 
   updateDownload(item.id, {
-    status: 'completed',
+    status: 'awaiting_folder',
     progress: 100,
     download_path: destPath.replace(/\\/g, '/'),
     size_bytes: buffer.length,
@@ -140,6 +145,58 @@ async function downloadViaQbittorrent(item: DownloadItem) {
   if (!addRes.ok) throw new Error('Error al añadir torrent a qBittorrent');
 
   updateDownload(item.id, { status: 'downloading', progress: 0 });
+}
+
+function moveFile(src: string, dest: string) {
+  try {
+    fs.renameSync(src, dest);
+  } catch {
+    fs.copyFileSync(src, dest);
+    fs.unlinkSync(src);
+  }
+}
+
+export async function finalizeDownload(
+  id: number,
+  folder: 'movies' | 'series',
+  subfolder?: string,
+): Promise<string> {
+  const item = getDownloadById(id);
+  if (!item) throw new Error('Descarga no encontrada');
+  if (item.status !== 'awaiting_folder') throw new Error('Esta descarga no está pendiente de ubicación');
+  if (!item.download_path || !fs.existsSync(item.download_path)) {
+    throw new Error('Archivo descargado no encontrado');
+  }
+
+  const settings = getSettings();
+  const baseDir = folder === 'movies'
+    ? path.join(settings.media_path, settings.movies_path)
+    : path.join(settings.media_path, settings.series_path);
+
+  const cleanSub = subfolder?.replace(/[^a-zA-Z0-9áéíóúñÁÉÍÓÚÑ\s._-]/g, '').trim();
+  const destDir = cleanSub ? path.join(baseDir, cleanSub) : baseDir;
+
+  if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+
+  const filename = path.basename(item.download_path);
+  const destPath = path.join(destDir, filename);
+
+  try {
+    moveFile(item.download_path, destPath);
+  } catch (err) {
+    const code = err && typeof err === 'object' && 'code' in err ? String((err as NodeJS.ErrnoException).code) : '';
+    if (code === 'EROFS' || code === 'EACCES') {
+      throw new Error('No se puede escribir en la biblioteca (solo lectura). Quita :ro del volumen de videos en Docker.');
+    }
+    throw err;
+  }
+
+  updateDownload(item.id, {
+    status: 'completed',
+    download_path: destPath.replace(/\\/g, '/'),
+  });
+
+  return destPath.replace(/\\/g, '/');
 }
 
 export function startDownloadProcessor() {

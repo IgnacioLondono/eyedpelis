@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Play, Star, Calendar, Clock, Globe, Film, Tv, Subtitles, HardDrive, Tag,
@@ -33,6 +34,18 @@ export default function MediaDetailView({ media, tmdb, libraryId, type, episodes
   const subtitles: SubtitleTrack[] = media?.subtitles || [];
   const canPlay = media?.file_path && libraryId;
   const isSeries = type === 'series';
+
+  const episodesBySeason = useMemo(() => {
+    const groups = new Map<number, MediaItem[]>();
+    for (const ep of episodes) {
+      const season = ep.season ?? 0;
+      if (!groups.has(season)) groups.set(season, []);
+      groups.get(season)!.push(ep);
+    }
+    return [...groups.entries()].sort(([a], [b]) => a - b);
+  }, [episodes]);
+
+  const firstEpisode = episodes.find(e => e.season === 1 && e.episode === 1) ?? episodes[0];
 
   return (
     <div className="pb-12">
@@ -141,8 +154,8 @@ export default function MediaDetailView({ media, tmdb, libraryId, type, episodes
                   <Play size={20} fill="white" /> Reproducir
                 </Link>
               ) : isSeries && episodes.length > 0 ? (
-                <Link to={`/watch/${episodes[0].id}`} className="btn-primary inline-flex items-center gap-2">
-                  <Play size={18} fill="white" /> Ver T1E1
+                <Link to={`/watch/${firstEpisode.id}`} className="btn-primary inline-flex items-center gap-2">
+                  <Play size={18} fill="white" /> Ver T{String(firstEpisode.season).padStart(2, '0')}E{String(firstEpisode.episode).padStart(2, '0')}
                 </Link>
               ) : null}
             </div>
@@ -188,23 +201,36 @@ export default function MediaDetailView({ media, tmdb, libraryId, type, episodes
         {/* Episodios (series) */}
         {isSeries && episodes.length > 0 && (
           <div className="mt-12 animate-fade-in-up" style={{ animationDelay: '200ms' }}>
-            <h2 className="text-xl font-bold mb-4">Episodios en tu biblioteca</h2>
-            <div className="space-y-2">
-              {episodes.map(ep => (
-                <Link
-                  key={ep.id}
-                  to={`/watch/${ep.id}`}
-                  className="flex items-center gap-4 bg-surface-card border border-purple-500/10 rounded-xl p-4 hover:border-accent/40 hover:bg-surface-hover transition-all duration-300 group"
-                >
-                  <span className="text-sm font-mono text-accent w-16">
-                    S{String(ep.season).padStart(2, '0')}E{String(ep.episode).padStart(2, '0')}
-                  </span>
-                  <span className="text-sm flex-1 truncate group-hover:text-white transition-colors">{ep.title}</span>
-                  {ep.subtitles && ep.subtitles.length > 0 && (
-                    <Subtitles size={14} className="text-gray-500" />
-                  )}
-                  <Play size={16} className="text-accent opacity-0 group-hover:opacity-100 transition-opacity" />
-                </Link>
+            <h2 className="text-xl font-bold mb-6">Episodios en tu biblioteca</h2>
+            <div className="space-y-8">
+              {episodesBySeason.map(([season, seasonEpisodes]) => (
+                <section key={season}>
+                  <h3 className="text-lg font-semibold text-accent-glow mb-3 flex items-center gap-2">
+                    <Tv size={18} />
+                    Temporada {season > 0 ? season : '?'}
+                    <span className="text-sm font-normal text-gray-500">
+                      · {seasonEpisodes.length} {seasonEpisodes.length === 1 ? 'episodio' : 'episodios'}
+                    </span>
+                  </h3>
+                  <div className="space-y-2">
+                    {seasonEpisodes.map(ep => (
+                      <Link
+                        key={ep.id}
+                        to={`/watch/${ep.id}`}
+                        className="flex items-center gap-4 bg-surface-card border border-purple-500/10 rounded-xl p-4 hover:border-accent/40 hover:bg-surface-hover transition-all duration-300 group"
+                      >
+                        <span className="text-sm font-mono text-accent w-16">
+                          E{String(ep.episode).padStart(2, '0')}
+                        </span>
+                        <span className="text-sm flex-1 truncate group-hover:text-white transition-colors">{ep.title}</span>
+                        {ep.subtitles && ep.subtitles.length > 0 && (
+                          <Subtitles size={14} className="text-gray-500" />
+                        )}
+                        <Play size={16} className="text-accent opacity-0 group-hover:opacity-100 transition-opacity" />
+                      </Link>
+                    ))}
+                  </div>
+                </section>
               ))}
             </div>
           </div>

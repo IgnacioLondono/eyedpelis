@@ -47,8 +47,37 @@ function walkDir(dir: string, type: MediaType, results: ParsedFile[] = [], paren
   return results;
 }
 
+export async function enrichMissingMetadata(): Promise<number> {
+  const targets = findMedia(m => {
+    if (m.poster_path && m.tmdb_id) return false;
+    if (m.type === 'movie') return !!m.file_path;
+    return !m.file_path;
+  });
+
+  let enriched = 0;
+  for (const item of targets) {
+    const year = item.release_date ? parseInt(item.release_date.slice(0, 4)) : undefined;
+    const { title, year: parsedYear } = cleanTitleForSearch(item.title, year);
+    const tmdb = await enrichFromTmdb(title, item.type, parsedYear);
+    if (tmdb) {
+      updateMedia(item.id, tmdbMetadataFields(tmdb));
+      enriched++;
+    }
+  }
+  return enriched;
+}
+
+function cleanTitleForSearch(title: string, year?: number): { title: string; year?: number } {
+  const parenYear = title.match(/^(.+?)\s*\(((19|20)\d{2})\)\s*$/);
+  if (parenYear) {
+    return { title: parenYear[1].trim(), year: year ?? parseInt(parenYear[2]) };
+  }
+  return { title: title.trim(), year };
+}
+
 async function fetchTmdbForFile(file: ParsedFile) {
-  return enrichFromTmdb(file.title, file.type, file.year);
+  const { title, year } = cleanTitleForSearch(file.title, file.year);
+  return enrichFromTmdb(title, file.type, year);
 }
 
 function applyTmdbToItem(file: ParsedFile, tmdb: Awaited<ReturnType<typeof fetchTmdbForFile>>) {
@@ -65,7 +94,8 @@ async function enrichExistingItem(file: ParsedFile, existing: MediaItem) {
   const updates: Partial<MediaItem> = { file_size: file.fileSize, subtitles: subs };
 
   if (!existing.tmdb_id || !existing.poster_path) {
-    const tmdb = await fetchTmdbForFile(file);
+    const { title, year } = cleanTitleForSearch(file.title, file.year);
+    const tmdb = await enrichFromTmdb(title, file.type, year);
     Object.assign(updates, applyTmdbToItem(file, tmdb));
   }
 
@@ -122,9 +152,8 @@ export async function scanLibrary(): Promise<ScanResult> {
         if (parent) {
           seriesCache.set(seriesKey, parent.id);
         } else {
-          const seriesTmdb = file.type === 'series'
-            ? await enrichFromTmdb(file.title, 'series', file.year)
-            : null;
+          const { title, year } = cleanTitleForSearch(file.title, file.year);
+          const seriesTmdb = await enrichFromTmdb(title, 'series', year);
           const seriesMeta = applyTmdbToItem(
             { ...file, type: 'series', season: undefined, episode: undefined },
             seriesTmdb,
@@ -185,6 +214,8 @@ export async function scanLibrary(): Promise<ScanResult> {
       removed++;
     }
   }
+
+  await enrichMissingMetadata();
 
   persist();
   return { added, updated, removed, total: files.length };

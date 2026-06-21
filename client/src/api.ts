@@ -71,6 +71,15 @@ export const api = {
       body: JSON.stringify(data),
     }),
   deleteDownload: (id: number) => request(`/downloads/${id}`, { method: 'DELETE' }),
+  finalizeDownload: (id: number, folder: 'movies' | 'series', subfolder?: string) =>
+    request<{ ok: boolean; path: string; scan: { added: number; updated: number; removed: number; total: number } }>(
+      `/downloads/${id}/finalize`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folder, subfolder }),
+      },
+    ),
   getSettings: () => request<import('./types').Settings>('/settings'),
   saveSettings: (data: Partial<import('./types').Settings>) =>
     request('/settings', {
@@ -79,6 +88,7 @@ export const api = {
       body: JSON.stringify(data),
     }),
   scanLibrary: () => request<{ added: number; updated: number; removed: number; total: number }>('/settings/scan', { method: 'POST' }),
+  reEnrichMetadata: () => request<{ enriched: number }>('/settings/re-enrich', { method: 'POST' }),
   testJellyfin: () => request<{ ok: boolean; message: string }>('/integrations/jellyfin/test'),
   testPlex: () => request<{ ok: boolean; message: string }>('/integrations/plex/test'),
   syncJellyfin: () => request<{ matched: number; updated: number; errors: string[] }>('/integrations/jellyfin/sync', { method: 'POST' }),

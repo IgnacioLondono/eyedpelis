@@ -40,7 +40,7 @@ export interface DownloadItem {
   magnet_url: string | null;
   torrent_url: string | null;
   direct_url: string | null;
-  status: 'queued' | 'downloading' | 'completed' | 'failed' | 'paused';
+  status: 'queued' | 'downloading' | 'completed' | 'failed' | 'paused' | 'awaiting_folder';
   progress: number;
   size_bytes: number | null;
   download_path: string | null;

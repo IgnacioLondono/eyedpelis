@@ -22,6 +22,7 @@ export default function SettingsPage() {
   });
   const [saving, setSaving] = useState(false);
   const [scanning, setScanning] = useState(false);
+  const [enriching, setEnriching] = useState(false);
   const [scanResult, setScanResult] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [integrationMsg, setIntegrationMsg] = useState<{ ok?: boolean; text: string } | null>(null);
@@ -57,6 +58,19 @@ export default function SettingsPage() {
       setScanResult(err instanceof Error ? err.message : 'Error al escanear');
     } finally {
       setScanning(false);
+    }
+  }
+
+  async function handleReEnrich() {
+    setEnriching(true);
+    setScanResult(null);
+    try {
+      const result = await api.reEnrichMetadata();
+      setScanResult(`Metadatos TMDB actualizados en ${result.enriched} títulos`);
+    } catch (err) {
+      setScanResult(err instanceof Error ? err.message : 'Error al actualizar metadatos');
+    } finally {
+      setEnriching(false);
     }
   }
 
@@ -304,15 +318,26 @@ export default function SettingsPage() {
               Escaneo automático activado
             </label>
           </div>
-          <button
-            type="button"
-            onClick={handleScan}
-            disabled={scanning}
-            className="btn-secondary flex items-center gap-2 mt-4"
-          >
-            <RefreshCw size={16} className={scanning ? 'animate-spin' : ''} />
-            {scanning ? 'Escaneando...' : 'Escanear biblioteca ahora'}
-          </button>
+          <div className="flex flex-wrap gap-3 mt-4">
+            <button
+              type="button"
+              onClick={handleScan}
+              disabled={scanning || enriching}
+              className="btn-secondary flex items-center gap-2"
+            >
+              <RefreshCw size={16} className={scanning ? 'animate-spin' : ''} />
+              {scanning ? 'Escaneando...' : 'Escanear biblioteca ahora'}
+            </button>
+            <button
+              type="button"
+              onClick={handleReEnrich}
+              disabled={scanning || enriching}
+              className="btn-secondary flex items-center gap-2"
+            >
+              <RefreshCw size={16} className={enriching ? 'animate-spin' : ''} />
+              {enriching ? 'Actualizando...' : 'Actualizar posters TMDB'}
+            </button>
+          </div>
           {scanResult && <p className="text-sm text-gray-400 mt-3">{scanResult}</p>}
         </section>
 

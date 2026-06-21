@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { Search as SearchIcon, Download, Film, Tv } from 'lucide-react';
+import { Search as SearchIcon, Download, Film, Tv, Link2, Info } from 'lucide-react';
 import { api, posterUrl } from '../api';
+import Modal from '../components/Modal';
 import type { SearchResult } from '../types';
 
 export default function Search() {
@@ -8,10 +9,11 @@ export default function Search() {
   const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState<'all' | 'movie' | 'series'>('all');
-  const [downloading, setDownloading] = useState<number | null>(null);
+  const [submitting, setSubmitting] = useState(false);
   const [showModal, setShowModal] = useState<SearchResult | null>(null);
   const [magnetUrl, setMagnetUrl] = useState('');
   const [directUrl, setDirectUrl] = useState('');
+  const [error, setError] = useState<string | null>(null);
 
   async function handleSearch(e: React.FormEvent) {
     e.preventDefault();
@@ -27,29 +29,42 @@ export default function Search() {
     }
   }
 
-  async function handleDownload(item: SearchResult) {
+  function openDownloadModal(item: SearchResult) {
+    setShowModal(item);
+    setMagnetUrl('');
+    setDirectUrl('');
+    setError(null);
+  }
+
+  function closeModal() {
+    setShowModal(null);
+    setError(null);
+  }
+
+  async function handleDownload() {
+    if (!showModal) return;
     if (!magnetUrl && !directUrl) {
-      setShowModal(item);
+      setError('Pega un enlace magnet o URL directa');
       return;
     }
-    setDownloading(item.id);
+
+    setSubmitting(true);
+    setError(null);
     try {
       await api.addDownload({
-        tmdb_id: item.id,
-        type: item.type,
-        title: item.title,
-        poster_path: item.poster_path,
+        tmdb_id: showModal.id,
+        type: showModal.type,
+        title: showModal.title,
+        poster_path: showModal.poster_path,
         magnet_url: magnetUrl || undefined,
         direct_url: directUrl || undefined,
       });
-      alert(`"${item.title}" añadido a la cola de descargas`);
-      setShowModal(null);
-      setMagnetUrl('');
-      setDirectUrl('');
+      closeModal();
+      alert(`"${showModal.title}" añadido a la cola. Cuando termine te pediremos en qué carpeta guardarlo.`);
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Error al descargar');
+      setError(err instanceof Error ? err.message : 'Error al descargar');
     } finally {
-      setDownloading(null);
+      setSubmitting(false);
     }
   }
 
@@ -111,8 +126,7 @@ export default function Search() {
               <p className="text-sm text-gray-400 line-clamp-2 mt-1">{item.overview}</p>
             </div>
             <button
-              onClick={() => { setShowModal(item); setMagnetUrl(''); setDirectUrl(''); }}
-              disabled={downloading === item.id}
+              onClick={() => openDownloadModal(item)}
               className="btn-primary flex items-center gap-2 self-center flex-shrink-0"
             >
               <Download size={18} />
@@ -122,49 +136,57 @@ export default function Search() {
         ))}
       </div>
 
-      {/* Modal de descarga */}
-      {showModal && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4 animate-fade-in backdrop-blur-sm">
-          <div className="bg-surface-card border border-purple-500/20 rounded-2xl p-6 max-w-lg w-full animate-scale-in shadow-purple-lg">
-            <h2 className="text-xl font-bold mb-1">Descargar: {showModal.title}</h2>
-            <p className="text-sm text-gray-400 mb-6">Pega un enlace magnet, torrent o URL directa</p>
+      <Modal
+        open={!!showModal}
+        onClose={closeModal}
+        title={showModal ? `Descargar: ${showModal.title}` : undefined}
+      >
+        <p className="text-sm text-gray-400 mb-4 flex items-start gap-2">
+          <Info size={16} className="mt-0.5 flex-shrink-0" />
+          Eyedpelis no descarga de TMDB directamente. Pega un enlace magnet o URL directa del archivo.
+          Al terminar te preguntaremos si va a Películas o Series.
+        </p>
 
-            <div className="space-y-4">
-              <div>
-                <label className="text-sm text-gray-400 block mb-1">Enlace Magnet / Torrent</label>
-                <input
-                  type="text"
-                  value={magnetUrl}
-                  onChange={e => setMagnetUrl(e.target.value)}
-                  placeholder="magnet:?xt=..."
-                  className="w-full bg-surface border border-surface-border rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-accent"
-                />
-              </div>
-              <div>
-                <label className="text-sm text-gray-400 block mb-1">URL directa (HTTP/HTTPS)</label>
-                <input
-                  type="text"
-                  value={directUrl}
-                  onChange={e => setDirectUrl(e.target.value)}
-                  placeholder="https://..."
-                  className="w-full bg-surface border border-surface-border rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-accent"
-                />
-              </div>
-            </div>
-
-            <div className="flex gap-3 mt-6">
-              <button
-                onClick={() => handleDownload(showModal)}
-                disabled={!magnetUrl && !directUrl}
-                className="btn-primary flex-1 disabled:opacity-50"
-              >
-                Añadir a cola
-              </button>
-              <button onClick={() => setShowModal(null)} className="btn-secondary">Cancelar</button>
-            </div>
+        <div className="space-y-4">
+          <div>
+            <label className="text-sm text-gray-400 mb-1 flex items-center gap-1">
+              <Link2 size={14} /> Enlace Magnet / Torrent
+            </label>
+            <input
+              type="text"
+              value={magnetUrl}
+              onChange={e => { setMagnetUrl(e.target.value); setError(null); }}
+              placeholder="magnet:?xt=..."
+              className="w-full bg-surface border border-surface-border rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-accent"
+            />
+          </div>
+          <div>
+            <label className="text-sm text-gray-400 block mb-1">URL directa (HTTP/HTTPS)</label>
+            <input
+              type="text"
+              value={directUrl}
+              onChange={e => { setDirectUrl(e.target.value); setError(null); }}
+              placeholder="https://..."
+              className="w-full bg-surface border border-surface-border rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-accent"
+            />
           </div>
         </div>
-      )}
+
+        {error && (
+          <p className="text-sm text-red-400 mt-4">{error}</p>
+        )}
+
+        <div className="flex gap-3 mt-6">
+          <button
+            onClick={handleDownload}
+            disabled={submitting || (!magnetUrl && !directUrl)}
+            className="btn-primary flex-1 disabled:opacity-50"
+          >
+            {submitting ? 'Añadiendo...' : 'Añadir a cola'}
+          </button>
+          <button type="button" onClick={closeModal} className="btn-secondary">Cancelar</button>
+        </div>
+      </Modal>
     </div>
   );
 }

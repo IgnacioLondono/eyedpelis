@@ -49,6 +49,7 @@ export interface DownloadItem {
   status: string;
   progress: number;
   size_bytes: number | null;
+  download_path?: string | null;
   error_message: string | null;
   created_at: string;
 }
