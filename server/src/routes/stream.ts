@@ -42,6 +42,7 @@ router.get('/:id/subtitle/:index', async (req, res) => {
   try {
     const { content, contentType } = await getSubtitleTrackContent(track);
     res.setHeader('Content-Type', contentType);
+    res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Cache-Control', track.embedded ? 'public, max-age=86400' : 'public, max-age=3600');
     res.send(content);
   } catch (err) {

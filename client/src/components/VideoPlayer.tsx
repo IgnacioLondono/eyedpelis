@@ -3,6 +3,7 @@ import {
   ArrowLeft, Play, Pause, Volume2, VolumeX, Maximize, Minimize,
   Subtitles, Loader2, SkipBack, SkipForward, Settings, Languages,
 } from 'lucide-react';
+import { findActiveCue, parseVtt, type VttCue } from '../utils/vttParser';
 
 interface SubtitleOption {
   index: number;
@@ -242,12 +243,15 @@ export default function VideoPlayer({
   const [buffering, setBuffering] = useState(true);
   const [activeSub, setActiveSub] = useState(-1);
   const [activeAudio, setActiveAudio] = useState(preferredAudioIndex);
-  const [textTracks, setTextTracks] = useState<{ index: number; label: string }[]>([]);
   const [browserAudioTracks, setBrowserAudioTracks] = useState<AudioOption[]>([]);
   const [showLangMenu, setShowLangMenu] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [playbackRate, setPlaybackRate] = useState(1);
   const [error, setError] = useState<string | null>(null);
+  const [subtitleCues, setSubtitleCues] = useState<VttCue[]>([]);
+  const [activeCueText, setActiveCueText] = useState<string | null>(null);
+  const [loadingSubs, setLoadingSubs] = useState(false);
+  const cuesCache = useRef<Map<number, VttCue[]>>(new Map());
 
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
   const bufferProgress = duration > 0 ? (buffered / duration) * 100 : 0;
@@ -262,9 +266,7 @@ export default function VideoPlayer({
 
   const audioOptions = browserAudioTracks.length > 0 ? browserAudioTracks : probeAudioOptions;
 
-  const subtitleOptions = textTracks.length > 0
-    ? textTracks
-    : subtitles.map(s => ({ index: s.index, label: s.label }));
+  const subtitleOptions = subtitles.map(s => ({ index: s.index, label: s.label }));
 
   const canSwitchAudioBrowser = browserAudioTracks.length > 1;
   const canSwitchAudioCompat = probeAudioOptions.length > 1 && !!compatSrc;
@@ -281,12 +283,40 @@ export default function VideoPlayer({
 
   const applySubtitleTrack = useCallback((trackIndex: number) => {
     const v = videoRef.current;
-    if (!v) return;
-    for (let i = 0; i < v.textTracks.length; i++) {
-      v.textTracks[i].mode = i === trackIndex ? 'showing' : 'hidden';
+    if (v) {
+      for (let i = 0; i < v.textTracks.length; i++) {
+        v.textTracks[i].mode = 'hidden';
+      }
     }
     setActiveSub(trackIndex);
   }, []);
+
+  const loadSubtitleCues = useCallback(async (trackIndex: number) => {
+    const sub = subtitles.find(s => s.index === trackIndex);
+    if (!sub) {
+      setSubtitleCues([]);
+      return;
+    }
+
+    if (cuesCache.current.has(trackIndex)) {
+      setSubtitleCues(cuesCache.current.get(trackIndex)!);
+      return;
+    }
+
+    setLoadingSubs(true);
+    try {
+      const res = await fetch(sub.src);
+      if (!res.ok) throw new Error('No se pudo cargar el subtítulo');
+      const text = await res.text();
+      const cues = parseVtt(text);
+      cuesCache.current.set(trackIndex, cues);
+      setSubtitleCues(cues);
+    } catch {
+      setSubtitleCues([]);
+    } finally {
+      setLoadingSubs(false);
+    }
+  }, [subtitles]);
 
   const applyBrowserAudioTrack = useCallback((trackIndex: number) => {
     const v = videoRef.current as VideoWithAudioTracks;
@@ -348,15 +378,6 @@ export default function VideoPlayer({
     const v = videoRef.current;
     if (!v) return;
 
-    const subs: { index: number; label: string }[] = [];
-    for (let i = 0; i < v.textTracks.length; i++) {
-      const t = v.textTracks[i];
-      if (t.kind !== 'subtitles' && t.kind !== 'captions') continue;
-      const label = t.label || langLabel(t.language, `Subtítulo ${i + 1}`);
-      subs.push({ index: i, label });
-    }
-    setTextTracks(subs);
-
     const audios: AudioOption[] = [];
     const at = (v as VideoWithAudioTracks).audioTracks;
     if (at && at.length > 0) {
@@ -374,21 +395,19 @@ export default function VideoPlayer({
     if (audios.length === 0) setActiveAudio(preferredAudioIndex);
     else ensureAudioTrackEnabled(preferredAudioIndex);
 
-    if (!initialSubApplied.current && subs.length > 0) {
+    if (!initialSubApplied.current && subtitles.length > 0) {
       initialSubApplied.current = true;
       if (localStorage.getItem('eyedpelis_prefer_subs') !== 'off') {
-        const esIdx = subs.findIndex(s => {
-          const tt = v.textTracks[s.index];
-          const lang = (tt.language || '').toLowerCase();
+        const esIdx = subtitles.findIndex(s => {
+          const lang = (s.language || '').toLowerCase();
           return lang === 'es' || lang === 'spa' || lang.startsWith('es');
         });
         if (esIdx >= 0) {
-          applySubtitleTrack(subs[esIdx].index);
-          return;
+          applySubtitleTrack(subtitles[esIdx].index);
         }
       }
     }
-  }, [applySubtitleTrack, ensureAudioTrackEnabled, preferredAudioIndex]);
+  }, [applySubtitleTrack, ensureAudioTrackEnabled, preferredAudioIndex, subtitles]);
 
   const togglePlay = useCallback(() => {
     const v = videoRef.current;
@@ -469,16 +488,13 @@ export default function VideoPlayer({
 
   const selectSubtitle = (trackIndex: number) => {
     if (trackIndex === -1) {
-      const v = videoRef.current;
-      if (v) {
-        for (let i = 0; i < v.textTracks.length; i++) {
-          v.textTracks[i].mode = 'hidden';
-        }
-      }
       setActiveSub(-1);
+      setSubtitleCues([]);
+      setActiveCueText(null);
       localStorage.setItem('eyedpelis_prefer_subs', 'off');
     } else {
       applySubtitleTrack(trackIndex);
+      loadSubtitleCues(trackIndex);
       localStorage.setItem('eyedpelis_prefer_subs', 'on');
     }
     setShowLangMenu(false);
@@ -500,6 +516,28 @@ export default function VideoPlayer({
   };
 
   useEffect(() => {
+    if (activeSub >= 0) {
+      loadSubtitleCues(activeSub);
+    } else {
+      setSubtitleCues([]);
+      setActiveCueText(null);
+    }
+  }, [activeSub, loadSubtitleCues]);
+
+  useEffect(() => {
+    if (activeSub < 0 || subtitleCues.length === 0) {
+      setActiveCueText(null);
+      return;
+    }
+    const cue = findActiveCue(subtitleCues, currentTime);
+    setActiveCueText(cue?.text ?? null);
+  }, [currentTime, activeSub, subtitleCues]);
+
+  useEffect(() => {
+    cuesCache.current.clear();
+  }, [subtitles]);
+
+  useEffect(() => {
     const v = videoRef.current;
     if (!v) return;
     v.volume = volume;
@@ -508,13 +546,15 @@ export default function VideoPlayer({
 
   useEffect(() => {
     initialSubApplied.current = false;
-    setTextTracks([]);
     setBrowserAudioTracks([]);
     setActiveSub(-1);
     setActiveAudio(preferredAudioIndex);
     setActiveSrc(src);
     setCompatMode(false);
     setActivatingAudio(false);
+    setSubtitleCues([]);
+    setActiveCueText(null);
+    cuesCache.current.clear();
     compatAttempted.current = false;
     compatStartOffset.current = 0;
     if (knownDuration) setDuration(knownDuration);
@@ -660,18 +700,21 @@ export default function VideoPlayer({
           }
           setError('Error al cargar el video. Comprueba el formato o la conexión.');
         }}
-      >
-        {subtitles.map(sub => (
-          <track
-            key={sub.index}
-            kind="subtitles"
-            src={sub.src}
-            srcLang={sub.language}
-            label={sub.label}
-            default={false}
-          />
-        ))}
-      </video>
+      />
+
+      {activeCueText && activeSub >= 0 && (
+        <div className="absolute bottom-28 md:bottom-32 left-0 right-0 z-10 flex justify-center px-4 md:px-10 pointer-events-none">
+          <p className="text-center text-white text-base md:text-xl font-medium leading-relaxed max-w-4xl bg-black/85 px-4 py-2.5 rounded-xl shadow-2xl whitespace-pre-line border border-white/10">
+            {activeCueText}
+          </p>
+        </div>
+      )}
+
+      {loadingSubs && activeSub >= 0 && !activeCueText && (
+        <div className="absolute bottom-28 left-1/2 -translate-x-1/2 z-10 text-xs text-white/50 pointer-events-none">
+          Cargando subtítulos…
+        </div>
+      )}
 
       {activatingAudio && !error && (
         <div className="absolute top-20 left-1/2 -translate-x-1/2 z-30 px-3 py-1.5 bg-black/70 backdrop-blur-sm rounded-lg text-white/70 text-xs pointer-events-none">
