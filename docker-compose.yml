@@ -25,8 +25,12 @@ services:
     container_name: eyedpelis
     restart: unless-stopped
     depends_on:
-      - qbittorrent
-      - prowlarr
+      qbittorrent-config:
+        condition: service_completed_successfully
+      qbittorrent:
+        condition: service_started
+      prowlarr:
+        condition: service_started
     ports:
       - "3001:3001"
     environment:
@@ -57,10 +61,24 @@ services:
     networks:
       - eyedpelis-net
 
+  qbittorrent-config:
+    image: alpine:3.20
+    container_name: eyedpelis-qbit-config
+    restart: "no"
+    volumes:
+      - ./data/qbittorrent:/config
+      - ./docker/qbittorrent-init.sh:/init.sh:ro
+    entrypoint: ["/bin/sh", "/init.sh"]
+    networks:
+      - eyedpelis-net
+
   qbittorrent:
     image: lscr.io/linuxserver/qbittorrent:latest
     container_name: eyedpelis-qbittorrent
     restart: unless-stopped
+    depends_on:
+      qbittorrent-config:
+        condition: service_completed_successfully
     environment:
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
