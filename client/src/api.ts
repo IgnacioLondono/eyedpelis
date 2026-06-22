@@ -84,16 +84,21 @@ export const api = {
   getSeasonDetails: (seriesId: number, seasonNumber: number) =>
     request<import('./utils/tmdbHelpers').TmdbSeasonDetails>(`/search/season/${seriesId}/${seasonNumber}`),
   getDownloads: () => request<import('./types').DownloadItem[]>('/downloads'),
-  searchTorrents: (params: { title: string; type: 'movie' | 'series'; year?: number; tmdb_id?: number }) => {
+  searchTorrents: (params: { title: string; type: 'movie' | 'series'; year?: number; tmdb_id?: number; original_title?: string }) => {
     const q = new URLSearchParams();
     q.set('title', params.title);
     q.set('type', params.type);
     if (params.year) q.set('year', String(params.year));
     if (params.tmdb_id) q.set('tmdb_id', String(params.tmdb_id));
-    return request<{ results: import('./types').TorrentResult[]; capabilities: Record<string, boolean> }>(
-      `/downloads/search?${q.toString()}`,
-    );
+    if (params.original_title) q.set('original_title', params.original_title);
+    return request<{
+      results: import('./types').TorrentResult[];
+      capabilities: Record<string, boolean>;
+      sources: Record<string, { ok: boolean; count: number; error?: string }>;
+    }>(`/downloads/search?${q.toString()}`);
   },
+  testProwlarr: () => request<{ ok: boolean; message: string }>('/downloads/test/prowlarr'),
+  testJackett: () => request<{ ok: boolean; message: string }>('/downloads/test/jackett'),
   addDownload: (data: Record<string, unknown>) =>
     request<import('./types').DownloadItem>('/downloads', {
       method: 'POST',

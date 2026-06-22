@@ -38,6 +38,8 @@ export default function SettingsPage() {
   const [currentPass, setCurrentPass] = useState('');
   const [newPass, setNewPass] = useState('');
   const [passMsg, setPassMsg] = useState<string | null>(null);
+  const [indexerMsg, setIndexerMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [testingIndexer, setTestingIndexer] = useState<'prowlarr' | 'jackett' | null>(null);
 
   useEffect(() => {
     api.getSettings().then(s => setSettings({ ...s, auto_scan: s.auto_scan ?? true })).catch(console.error);
@@ -67,6 +69,19 @@ export default function SettingsPage() {
     } else if (final?.result) {
       const label = scanScope === 'movie' ? 'películas' : scanScope === 'series' ? 'series' : 'archivos';
       setScanResult(`Escaneo de ${label}: ${final.result.total} en disco (+${final.result.added} nuevos, ${final.result.updated} actualizados, -${final.result.removed} eliminados)`);
+    }
+  }
+
+  async function testIndexer(which: 'prowlarr' | 'jackett') {
+    setTestingIndexer(which);
+    setIndexerMsg(null);
+    try {
+      const result = which === 'prowlarr' ? await api.testProwlarr() : await api.testJackett();
+      setIndexerMsg({ ok: result.ok, text: result.message });
+    } catch (err) {
+      setIndexerMsg({ ok: false, text: err instanceof Error ? err.message : 'Error de conexión' });
+    } finally {
+      setTestingIndexer(null);
     }
   }
 
@@ -257,8 +272,16 @@ export default function SettingsPage() {
                 value={settings.prowlarr_api_key}
                 onChange={e => update('prowlarr_api_key', e.target.value)}
                 placeholder="API Key de Prowlarr"
-                className="w-full bg-surface border border-surface-border rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-accent"
+                className="w-full bg-surface border border-surface-border rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-accent mb-2"
               />
+              <button
+                type="button"
+                onClick={() => testIndexer('prowlarr')}
+                disabled={testingIndexer === 'prowlarr'}
+                className="text-xs text-accent hover:text-accent-glow"
+              >
+                {testingIndexer === 'prowlarr' ? 'Probando Prowlarr...' : 'Probar conexión Prowlarr'}
+              </button>
             </div>
             <div>
               <label className="text-sm text-gray-400 block mb-1">Jackett URL (alternativa)</label>
@@ -274,9 +297,26 @@ export default function SettingsPage() {
                 value={settings.jackett_api_key}
                 onChange={e => update('jackett_api_key', e.target.value)}
                 placeholder="API Key de Jackett"
-                className="w-full bg-surface border border-surface-border rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-accent"
+                className="w-full bg-surface border border-surface-border rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-accent mb-2"
               />
+              <button
+                type="button"
+                onClick={() => testIndexer('jackett')}
+                disabled={testingIndexer === 'jackett'}
+                className="text-xs text-accent hover:text-accent-glow"
+              >
+                {testingIndexer === 'jackett' ? 'Probando Jackett...' : 'Probar conexión Jackett'}
+              </button>
             </div>
+            {indexerMsg && (
+              <p className={`text-sm flex items-center gap-2 ${indexerMsg.ok ? 'text-green-400' : 'text-red-400'}`}>
+                {indexerMsg.ok ? <CheckCircle size={16} /> : <XCircle size={16} />}
+                {indexerMsg.text}
+              </p>
+            )}
+            <p className="text-xs text-gray-500">
+              Usa la URL interna de Docker (ej. <code className="text-purple-400">http://prowlarr:9696</code>) para que Eyedpelis y qBittorrent puedan descargar los torrents.
+            </p>
           </div>
         </section>
 

@@ -21,6 +21,7 @@ export default function Search() {
   const [showManual, setShowManual] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searchCaps, setSearchCaps] = useState<Record<string, boolean> | null>(null);
+  const [searchSources, setSearchSources] = useState<Record<string, { ok: boolean; count: number; error?: string }> | null>(null);
 
   async function handleSearch(e: React.FormEvent) {
     e.preventDefault();
@@ -48,8 +49,10 @@ export default function Search() {
         type: item.type,
         year,
         tmdb_id: item.id,
+        original_title: item.original_title,
       });
       setSearchCaps(data.capabilities);
+      setSearchSources(data.sources);
       setTorrents(data.results);
       if (data.results.length > 0) setSelectedTorrent(data.results[0]);
     } catch (err) {
@@ -72,6 +75,7 @@ export default function Search() {
     setShowModal(null);
     setTorrents([]);
     setSelectedTorrent(null);
+    setSearchSources(null);
     setError(null);
   }
 
@@ -202,6 +206,31 @@ export default function Search() {
             </button>
           )}
         </div>
+
+        {searchSources && !searchingTorrents && (
+          <div className="flex flex-wrap gap-2 mb-3 text-[11px]">
+            {[
+              { key: 'prowlarr', label: 'Prowlarr', configured: searchCaps?.prowlarr },
+              { key: 'jackett', label: 'Jackett', configured: searchCaps?.jackett },
+              { key: 'yts', label: 'YTS', configured: showModal?.type === 'movie' },
+              { key: 'eztv', label: 'EZTV', configured: showModal?.type === 'series' },
+            ].map(({ key, label, configured }) => {
+              if (!configured) return null;
+              const s = searchSources[key];
+              if (!s) return null;
+              const tone = s.ok && s.count > 0
+                ? 'text-green-400 border-green-500/30 bg-green-500/10'
+                : s.ok
+                  ? 'text-gray-400 border-gray-500/30 bg-gray-500/10'
+                  : 'text-amber-400 border-amber-500/30 bg-amber-500/10';
+              return (
+                <span key={key} className={`px-2 py-1 rounded-md border ${tone}`} title={s.error}>
+                  {label}: {s.count > 0 ? `${s.count}` : s.error || '0'}
+                </span>
+              );
+            })}
+          </div>
+        )}
 
         {searchingTorrents ? (
           <div className="py-10 text-center text-gray-500">

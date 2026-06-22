@@ -3,7 +3,7 @@ import {
   addToQueue, getAllDownloads, deleteDownload, updateDownload, finalizeDownload, syncActiveDownloads,
 } from '../services/downloadManager.js';
 import { scanLibrary, scheduleBackgroundEnrich } from '../services/scanner.js';
-import { getSearchCapabilities, pickBestTorrent, searchTorrents } from '../services/torrentSearch.js';
+import { getSearchCapabilities, pickBestTorrent, searchTorrents, testJackettConnection, testProwlarrConnection } from '../services/torrentSearch.js';
 import type { MediaType } from '../types.js';
 
 const router = Router();
@@ -12,19 +12,28 @@ router.get('/capabilities', (_req, res) => {
   res.json(getSearchCapabilities());
 });
 
+router.get('/test/prowlarr', async (_req, res) => {
+  res.json(await testProwlarrConnection());
+});
+
+router.get('/test/jackett', async (_req, res) => {
+  res.json(await testJackettConnection());
+});
+
 router.get('/search', async (req, res) => {
   try {
     const title = String(req.query.title || '');
     const type = req.query.type as MediaType;
     const year = req.query.year ? parseInt(String(req.query.year)) : undefined;
     const tmdb_id = req.query.tmdb_id ? parseInt(String(req.query.tmdb_id)) : undefined;
+    const original_title = req.query.original_title ? String(req.query.original_title) : undefined;
 
     if (!title || (type !== 'movie' && type !== 'series')) {
       return res.status(400).json({ error: 'title y type (movie|series) son requeridos' });
     }
 
-    const results = await searchTorrents({ title, type, year, tmdb_id });
-    res.json({ results, capabilities: getSearchCapabilities() });
+    const { results, sources } = await searchTorrents({ title, type, year, tmdb_id, original_title });
+    res.json({ results, sources, capabilities: getSearchCapabilities() });
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : 'Error al buscar torrents' });
   }
@@ -57,7 +66,7 @@ router.post('/', async (req, res) => {
     let pickedFrom: string | undefined;
 
     if (!magnet && !torrent && !direct && auto_search !== false) {
-      const results = await searchTorrents({
+      const { results } = await searchTorrents({
         title,
         type: type as MediaType,
         year: year ? parseInt(String(year)) : undefined,
