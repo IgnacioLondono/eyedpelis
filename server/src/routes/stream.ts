@@ -121,9 +121,11 @@ router.get('/:id/compat-audio', async (req, res) => {
   const startSec = Math.max(0, parseFloat(req.query.start as string) || 0);
   const audioMap = resolveAudioMap(probe, audioIdx);
 
-  res.setHeader('Content-Type', 'audio/mp4');
+  // ADTS: más compatible con <audio> que fMP4 fragmentado en navegadores
+  res.setHeader('Content-Type', 'audio/aac');
   res.setHeader('Transfer-Encoding', 'chunked');
   res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Access-Control-Allow-Origin', '*');
 
   pipeFfmpeg(req, res, [
     '-hide_banner', '-loglevel', 'error',
@@ -132,8 +134,7 @@ router.get('/:id/compat-audio', async (req, res) => {
     '-vn',
     '-c:a', 'aac', '-b:a', '192k', '-ac', '2', '-ar', '48000',
     '-af', 'aresample=async=1:first_pts=0',
-    '-f', 'mp4',
-    '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
+    '-f', 'adts',
     'pipe:1',
   ], 'compat-audio');
 });
@@ -154,6 +155,7 @@ router.get('/:id/compat', async (req, res) => {
   res.setHeader('Content-Type', 'video/mp4');
   res.setHeader('Transfer-Encoding', 'chunked');
   res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Access-Control-Allow-Origin', '*');
 
   pipeFfmpeg(req, res, [
     '-hide_banner', '-loglevel', 'error',
@@ -193,6 +195,7 @@ router.get('/:id', (req, res) => {
       'Accept-Ranges': 'bytes',
       'Content-Length': chunkSize,
       'Content-Type': contentType,
+      'Access-Control-Allow-Origin': '*',
     });
 
     fs.createReadStream(item.file_path, { start, end }).pipe(res);
@@ -201,6 +204,7 @@ router.get('/:id', (req, res) => {
       'Content-Length': fileSize,
       'Content-Type': contentType,
       'Accept-Ranges': 'bytes',
+      'Access-Control-Allow-Origin': '*',
     });
     fs.createReadStream(item.file_path).pipe(res);
   }

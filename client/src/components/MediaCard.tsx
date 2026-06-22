@@ -20,7 +20,7 @@ export default function MediaCard({ item, libraryId, showPlay, index = 0 }: Prop
   return (
     <Link
       to={detailLink}
-      className="group block card-hover animate-fade-in-up"
+      className="group block card-hover animate-fade-in-up focus-visible:outline-none rounded-xl"
       style={{ animationDelay: `${Math.min(index * 70, 700)}ms` }}
     >
       <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-surface-card shadow-lg ring-1 ring-purple-500/10 group-hover:ring-purple-500/35 transition-all duration-500">

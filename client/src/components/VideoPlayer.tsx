@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { findActiveCue, parseVtt, type VttCue } from '../utils/vttParser';
 import { getAuthToken } from '../api';
+import { isTv } from '../utils/device';
 
 interface SubtitleOption {
   index: number;
@@ -77,10 +78,21 @@ function buildStreamUrl(base: string, audio: number, startSec: number, gen: numb
 
 function initialPlayback(
   videoSrc: string,
+  compatSrc: string | undefined,
   compatAudioSrc: string | undefined,
   needsCompat: boolean,
   audioIndex: number,
 ): Playback {
+  // Transmux (vídeo+audio en un solo <video>) es más fiable que split en móvil/TV
+  if (needsCompat && compatSrc) {
+    return {
+      engine: 'transcode',
+      videoSrc,
+      muxSrc: buildStreamUrl(compatSrc, audioIndex, 0, 0),
+      audioIndex,
+      offset: 0,
+    };
+  }
   if (needsCompat && compatAudioSrc) {
     return {
       engine: 'split',
@@ -170,9 +182,11 @@ export default function VideoPlayer({
   const streamGenRef = useRef(0);
   const audioAnchorRef = useRef(0);
   const audioReloadingRef = useRef(false);
+  const directAudioCheckRef = useRef<ReturnType<typeof setTimeout>>();
+  const directAudioFallbackRef = useRef(false);
 
   const [playback, setPlayback] = useState<Playback>(() =>
-    initialPlayback(src, compatAudioSrc, needsAudioCompat, preferredAudioIndex),
+    initialPlayback(src, compatSrc, compatAudioSrc, needsAudioCompat, preferredAudioIndex),
   );
   const [playing, setPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -195,6 +209,7 @@ export default function VideoPlayer({
   const [activeCue, setActiveCue] = useState<string | null>(null);
   const [loadingSubs, setLoadingSubs] = useState(false);
   const [subError, setSubError] = useState<string | null>(null);
+  const tvMode = isTv();
 
   const isSplit = playback.engine === 'split';
   const isTranscode = playback.engine === 'transcode';
@@ -330,10 +345,10 @@ export default function VideoPlayer({
   const selectAudio = (idx: number) => {
     if (idx === playback.audioIndex) { setShowLangMenu(false); return; }
     const t = timeRef.current;
-    if (compatAudioSrc) {
-      reloadAudio(t, idx);
-    } else if (compatSrc) {
+    if (compatSrc) {
       goTranscode(idx, t);
+    } else if (compatAudioSrc) {
+      reloadAudio(t, idx);
     }
     setShowLangMenu(false);
   };
@@ -380,7 +395,9 @@ export default function VideoPlayer({
     } catch { /* ignore */ }
   }, []);
 
-  const btn = 'p-2.5 rounded-xl hover:bg-white/15 active:bg-white/20 transition-all hover:scale-105 active:scale-95';
+  const btn = `rounded-xl hover:bg-white/15 active:bg-white/20 transition-all hover:scale-105 active:scale-95 focus-visible:outline-none ${
+    tvMode ? 'p-3.5 min-h-[48px] min-w-[48px] flex items-center justify-center' : 'p-2.5'
+  }`;
 
   useEffect(() => {
     subsInit.current = false;
@@ -394,11 +411,11 @@ export default function VideoPlayer({
     setActiveCue(null);
     setSubError(null);
     setError(null);
-    const pb = initialPlayback(src, compatAudioSrc, needsAudioCompat, preferredAudioIndex);
+    const pb = initialPlayback(src, compatSrc, compatAudioSrc, needsAudioCompat, preferredAudioIndex);
     playbackRef.current = pb;
     setPlayback(pb);
     if (knownDuration) setDuration(knownDuration);
-  }, [src, compatAudioSrc, needsAudioCompat, preferredAudioIndex, knownDuration]);
+  }, [src, compatSrc, compatAudioSrc, needsAudioCompat, preferredAudioIndex, knownDuration]);
 
   useEffect(() => {
     if (activeSub >= 0) loadSubs(activeSub);
@@ -464,24 +481,75 @@ export default function VideoPlayer({
   }, [isSplit, syncAudioElement, playback.audioSrc]);
 
   useEffect(() => {
+    if (!tvMode) return;
+    const el = containerRef.current;
+    if (el && !document.fullscreenElement) {
+      el.requestFullscreen().catch(() => {});
+    }
+  }, [tvMode]);
+
+  useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement) return;
       switch (e.key) {
-        case ' ': case 'k': e.preventDefault(); togglePlay(); break;
-        case 'ArrowLeft': e.preventDefault(); seekTo(currentTime - 10); break;
-        case 'ArrowRight': e.preventDefault(); seekTo(currentTime + 10); break;
-        case 'ArrowUp': e.preventDefault(); changeVol(volume + 0.1); break;
-        case 'ArrowDown': e.preventDefault(); changeVol(volume - 0.1); break;
-        case 'f': e.preventDefault(); toggleFs(); break;
-        case 'm': e.preventDefault(); toggleMute(); break;
-        case 'c': e.preventDefault(); setShowLangMenu(s => !s); break;
-        case 'Escape': setShowLangMenu(false); setShowSettings(false); break;
+        case ' ':
+        case 'k':
+        case 'MediaPlayPause':
+        case 'Play':
+        case 'Pause':
+          e.preventDefault();
+          togglePlay();
+          break;
+        case 'ArrowLeft':
+          e.preventDefault();
+          seekTo(currentTime - 10);
+          break;
+        case 'ArrowRight':
+          e.preventDefault();
+          seekTo(currentTime + 10);
+          break;
+        case 'ArrowUp':
+          e.preventDefault();
+          changeVol(volume + 0.1);
+          break;
+        case 'ArrowDown':
+          e.preventDefault();
+          changeVol(volume - 0.1);
+          break;
+        case 'f':
+          e.preventDefault();
+          toggleFs();
+          break;
+        case 'm':
+          e.preventDefault();
+          toggleMute();
+          break;
+        case 'c':
+          e.preventDefault();
+          setShowLangMenu(s => !s);
+          break;
+        case 'Escape':
+        case 'Backspace':
+        case 'BrowserBack':
+          if (showLangMenu) {
+            setShowLangMenu(false);
+            break;
+          }
+          if (showSettings) {
+            setShowSettings(false);
+            break;
+          }
+          if (tvMode) {
+            e.preventDefault();
+            onBack();
+          }
+          break;
       }
       reveal();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [togglePlay, seekTo, currentTime, volume, toggleFs, toggleMute, reveal]);
+  }, [togglePlay, seekTo, currentTime, volume, toggleFs, toggleMute, reveal, tvMode, onBack, showLangMenu, showSettings]);
 
   useEffect(() => {
     const onFs = () => setFullscreen(!!document.fullscreenElement);
@@ -492,7 +560,33 @@ export default function VideoPlayer({
   useEffect(() => () => {
     if (hideTimer.current) clearTimeout(hideTimer.current);
     if (audioSeekTimer.current) clearTimeout(audioSeekTimer.current);
+    if (directAudioCheckRef.current) clearTimeout(directAudioCheckRef.current);
   }, []);
+
+  // Si el vídeo arranca pero el navegador no decodifica audio (AC3/DTS en MKV), pasar a transcode
+  useEffect(() => {
+    if (directAudioCheckRef.current) clearTimeout(directAudioCheckRef.current);
+    directAudioFallbackRef.current = false;
+
+    if (playback.engine !== 'direct' || !compatSrc) return;
+
+    directAudioCheckRef.current = setTimeout(() => {
+      const v = videoRef.current;
+      if (!v || playbackRef.current?.engine !== 'direct' || directAudioFallbackRef.current) return;
+      if (v.paused || v.muted) return;
+
+      const decoded = (v as HTMLVideoElement & { webkitAudioDecodedByteCount?: number }).webkitAudioDecodedByteCount;
+      const noAudioDecoded = typeof decoded === 'number' && decoded === 0 && v.currentTime > 1;
+      if (noAudioDecoded) {
+        directAudioFallbackRef.current = true;
+        goTranscode(playback.audioIndex, timeRef.current);
+      }
+    }, 2500);
+
+    return () => {
+      if (directAudioCheckRef.current) clearTimeout(directAudioCheckRef.current);
+    };
+  }, [playback.engine, playback.audioIndex, compatSrc, goTranscode, videoSrc]);
 
   return (
     <div ref={containerRef} className="relative w-full h-screen bg-black overflow-hidden select-none"
@@ -540,12 +634,12 @@ export default function VideoPlayer({
             goTranscode(pb.audioIndex, timeRef.current);
             return;
           }
-          if (pb?.engine === 'direct' && compatAudioSrc && needsAudioCompat) {
-            reloadAudio(timeRef.current, pb.audioIndex);
+          if (pb?.engine === 'direct' && compatSrc) {
+            goTranscode(pb.audioIndex, timeRef.current);
             return;
           }
-          if (pb?.engine === 'direct' && compatSrc) {
-            goTranscode(preferredAudioIndex, timeRef.current);
+          if (pb?.engine === 'direct' && compatAudioSrc && needsAudioCompat) {
+            reloadAudio(timeRef.current, pb.audioIndex);
             return;
           }
           setError('No se pudo reproducir el video.');
@@ -576,7 +670,7 @@ export default function VideoPlayer({
 
       {activeCue && (
         <div className="absolute bottom-28 md:bottom-32 left-0 right-0 z-[25] flex justify-center px-4 pointer-events-none">
-          <p className="text-center text-white text-base md:text-xl font-medium leading-relaxed max-w-4xl bg-black/85 px-4 py-2.5 rounded-xl shadow-2xl whitespace-pre-line border border-white/10">
+          <p className="tv-subtitle text-center text-white text-base md:text-xl font-medium leading-relaxed max-w-4xl bg-black/85 px-4 py-2.5 rounded-xl shadow-2xl whitespace-pre-line border border-white/10">
             {activeCue}
           </p>
         </div>

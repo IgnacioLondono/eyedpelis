@@ -39,6 +39,7 @@ export default function Player() {
         setKnownDuration(streamInfo.probe.duration ?? null);
         setNeedsAudioCompat(streamInfo.probe.needsCompatAudio ?? !streamInfo.probe.browserFriendlyAudio);
       } else {
+        // Sin probe: asumir que puede necesitar transcode (códecs AC3/DTS frecuentes)
         setNeedsAudioCompat(true);
       }
 

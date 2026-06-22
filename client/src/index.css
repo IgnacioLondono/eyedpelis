@@ -66,6 +66,35 @@
   }
 }
 
+/* Navegación con mando / foco visible */
+@media (hover: none) and (pointer: coarse), (min-width: 1280px) {
+  a:focus-visible,
+  button:focus-visible,
+  [tabindex]:focus-visible {
+    outline: 3px solid #a855f7;
+    outline-offset: 4px;
+    box-shadow: 0 0 0 6px rgba(168, 85, 247, 0.35);
+  }
+}
+
+/* Modo Android TV */
+html.tv-mode {
+  font-size: 18px;
+}
+
+html.tv-mode .tv-main {
+  font-size: 1rem;
+}
+
+html.tv-mode .card-hover {
+  @apply hover:scale-[1.02];
+}
+
+html.tv-mode .tv-subtitle {
+  font-size: clamp(1.35rem, 2.5vw, 2rem) !important;
+  line-height: 1.5;
+}
+
 /* Subtítulos en el reproductor */
 video::cue {
   background: rgba(0, 0, 0, 0.82);

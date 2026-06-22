@@ -9,7 +9,7 @@ export interface MediaProbeResult {
   audioTracks: Array<{ index: number; streamIndex: number; codec: string; language: string; channels: number }>;
   videoCodec: string | null;
   browserFriendlyAudio: boolean;
-  /** Requiere audio transcodificado (split o mux): códec incompatible, varias pistas o pista recomendada ≠ predeterminada del navegador */
+  /** Requiere transcode: códec incompatible o pista de audio distinta a la primera del archivo */
   needsCompatAudio: boolean;
   recommendedAudioIndex: number;
   duration: number | null;
@@ -81,9 +81,12 @@ export async function probeMedia(filePath: string): Promise<MediaProbeResult | n
       if (friendlyIdx >= 0) recommended = friendlyIdx;
     }
 
+    const recommendedTrack = audioTracks[recommended];
+    const recommendedFriendly = recommendedTrack ? isFriendly(recommendedTrack.codec) : firstTrackFriendly;
+
+    // Compat solo si el navegador no puede reproducir la pista que queremos escuchar
     const needsCompatAudio =
-      !browserFriendlyAudio ||
-      audioTracks.length > 1 ||
+      !recommendedFriendly ||
       recommended !== 0 ||
       !firstTrackFriendly;
 

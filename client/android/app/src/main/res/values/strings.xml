@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Eyedpelis</string>
+    <string name="title_activity_main">Eyedpelis</string>
+    <string name="package_name">com.eyedcomun.eyedpelis</string>
+    <string name="custom_url_scheme">com.eyedcomun.eyedpelis</string>
+</resources>

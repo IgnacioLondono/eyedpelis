@@ -15,7 +15,7 @@ export default function MediaListRow({ item, showPlay }: Props) {
   return (
     <Link
       to={`/media/${item.id}`}
-      className="group flex gap-4 p-3 md:p-4 rounded-xl bg-surface-card border border-purple-500/10 hover:border-accent/35 hover:bg-surface-hover/50 transition-all duration-300"
+      className="group flex gap-4 p-3 md:p-4 rounded-xl bg-surface-card border border-purple-500/10 hover:border-accent/35 hover:bg-surface-hover/50 transition-all duration-300 focus-visible:outline-none min-h-[48px]"
     >
       <div className="relative w-16 h-24 md:w-20 md:h-[120px] flex-shrink-0 rounded-lg overflow-hidden ring-1 ring-purple-500/15 group-hover:ring-purple-500/40">
         <img
