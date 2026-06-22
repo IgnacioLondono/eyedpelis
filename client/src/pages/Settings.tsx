@@ -39,7 +39,9 @@ export default function SettingsPage() {
   const [newPass, setNewPass] = useState('');
   const [passMsg, setPassMsg] = useState<string | null>(null);
   const [indexerMsg, setIndexerMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  const [testingIndexer, setTestingIndexer] = useState<'prowlarr' | 'jackett' | 'qbittorrent' | null>(null);
+  const [allTests, setAllTests] = useState<Array<{ name: string; ok: boolean; message: string }> | null>(null);
+  const [indexerChecks, setIndexerChecks] = useState<Array<{ name: string; ok: boolean; message: string; source: string }> | null>(null);
+  const [testingIndexer, setTestingIndexer] = useState<'prowlarr' | 'jackett' | 'qbittorrent' | 'all' | 'indexers' | null>(null);
 
   useEffect(() => {
     api.getSettings().then(s => setSettings({ ...s, auto_scan: s.auto_scan ?? true })).catch(console.error);
@@ -72,10 +74,39 @@ export default function SettingsPage() {
     }
   }
 
-  async function testIndexer(which: 'prowlarr' | 'jackett' | 'qbittorrent') {
+  async function testIndexer(which: 'prowlarr' | 'jackett' | 'qbittorrent' | 'all' | 'indexers') {
     setTestingIndexer(which);
     setIndexerMsg(null);
+    setAllTests(null);
+    setIndexerChecks(null);
     try {
+      if (which === 'indexers') {
+        const report = await api.testIndexers();
+        setIndexerChecks(report.checks);
+        setIndexerMsg({
+          ok: report.summary.ok > 0,
+          text: `Indexadores: ${report.summary.ok}/${report.summary.total} OK · Prowlarr: ${report.prowlarr.message} · Jackett: ${report.jackett.message} · Públicos: ${report.public.message}`,
+        });
+        return;
+      }
+      if (which === 'all') {
+        const report = await api.testAllIntegrations();
+        setAllTests([
+          { name: 'qBittorrent', ...report.qbittorrent },
+          { name: 'Prowlarr', ...report.prowlarr },
+          { name: 'Jackett', ...report.jackett },
+          { name: 'FlareSolverr', ...report.flaresolverr },
+        ]);
+        setIndexerChecks(report.indexers.checks);
+        const allOk = report.qbittorrent.ok && report.prowlarr.ok && report.indexers.summary.ok > 0;
+        setIndexerMsg({
+          ok: allOk,
+          text: allOk
+            ? `Todo OK · ${report.indexers.summary.ok}/${report.indexers.summary.total} indexadores responden`
+            : `Revisa abajo. Indexadores: ${report.indexers.summary.ok}/${report.indexers.summary.total} OK`,
+        });
+        return;
+      }
       const result = which === 'prowlarr'
         ? await api.testProwlarr()
         : which === 'jackett'
@@ -228,9 +259,51 @@ export default function SettingsPage() {
             <h2 className="text-lg font-semibold">Descargas (qBittorrent + indexadores)</h2>
           </div>
           <p className="text-sm text-gray-400 mb-4">
-            Stack Docker: qBittorrent (:8787), Prowlarr (:9696) y Jackett (:9117) van en el mismo compose.
-            Prowlarr o Jackett amplían la búsqueda automática a cientos de indexadores.
+            Stack Docker integrado. Abre en el navegador (no uses /api):
+            qBittorrent <code className="text-purple-400">:18787</code> ·
+            Prowlarr <code className="text-purple-400">:19696</code> ·
+            Jackett <code className="text-purple-400">:19117</code>
           </p>
+          <div className="flex flex-wrap gap-2 mb-4">
+            <button
+              type="button"
+              onClick={() => testIndexer('all')}
+              disabled={testingIndexer !== null}
+              className="btn-secondary text-sm"
+            >
+              {testingIndexer === 'all' ? 'Verificando todo...' : 'Verificar servicios + indexadores'}
+            </button>
+            <button
+              type="button"
+              onClick={() => testIndexer('indexers')}
+              disabled={testingIndexer !== null}
+              className="btn-secondary text-sm"
+            >
+              {testingIndexer === 'indexers' ? 'Probando indexadores...' : 'Solo indexadores'}
+            </button>
+          </div>
+          {allTests && (
+            <ul className="text-sm space-y-1.5 mb-4">
+              {allTests.map(t => (
+                <li key={t.name} className={t.ok ? 'text-green-400' : 'text-red-400'}>
+                  {t.ok ? '✓' : '✗'} <strong>{t.name}:</strong> {t.message}
+                </li>
+              ))}
+            </ul>
+          )}
+          {indexerChecks && indexerChecks.length > 0 && (
+            <div className="mb-4 max-h-64 overflow-y-auto rounded-lg border border-surface-border p-3 bg-surface">
+              <p className="text-xs text-gray-500 mb-2">Detalle por indexador</p>
+              <ul className="text-xs space-y-1">
+                {indexerChecks.map(c => (
+                  <li key={`${c.source}-${c.name}`} className={c.ok ? 'text-green-400' : 'text-red-400'}>
+                    {c.ok ? '✓' : '✗'} <span className="text-gray-500">[{c.source}]</span> {c.name}
+                    {!c.ok && c.message !== 'OK' && <span className="text-gray-500"> — {c.message}</span>}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           <div className="space-y-4">
             <div>
               <label className="text-sm text-gray-400 block mb-1">qBittorrent URL</label>
@@ -242,8 +315,8 @@ export default function SettingsPage() {
                 className="w-full bg-surface border border-surface-border rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-accent"
               />
               <p className="text-xs text-gray-500 mt-1">
-                Red Docker: <code className="text-purple-400">http://qbittorrent:8080</code> (puerto interno) ·
-                Host: <code className="text-purple-400">http://192.168.50.197:8787</code> solo desde fuera de Docker
+                Navegador: <code className="text-purple-400">http://192.168.50.197:18787</code> ·
+                Docker: <code className="text-purple-400">http://qbittorrent:8080</code>
               </p>
               <button
                 type="button"
@@ -276,9 +349,10 @@ export default function SettingsPage() {
                 type="text"
                 value={settings.prowlarr_url}
                 onChange={e => update('prowlarr_url', e.target.value)}
-                placeholder="http://localhost:9696"
+                placeholder="http://prowlarr:9696"
                 className="w-full bg-surface border border-surface-border rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-accent mb-2"
               />
+              <p className="text-xs text-gray-500 mb-2">Web UI: <code className="text-purple-400">http://192.168.50.197:19696</code></p>
               <input
                 type="password"
                 value={settings.prowlarr_api_key}
@@ -301,9 +375,10 @@ export default function SettingsPage() {
                 type="text"
                 value={settings.jackett_url}
                 onChange={e => update('jackett_url', e.target.value)}
-                placeholder="http://localhost:9117"
+                placeholder="http://jackett:9117"
                 className="w-full bg-surface border border-surface-border rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-accent mb-2"
               />
+              <p className="text-xs text-gray-500 mb-2">Web UI: <code className="text-purple-400">http://192.168.50.197:19117</code></p>
               <input
                 type="password"
                 value={settings.jackett_api_key}

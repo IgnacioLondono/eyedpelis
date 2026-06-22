@@ -575,8 +575,11 @@ export function getSearchCapabilities() {
 
 export async function testProwlarrConnection(): Promise<{ ok: boolean; message: string }> {
   const { prowlarr_url, prowlarr_api_key } = getSettings();
-  if (!prowlarr_url || !prowlarr_api_key) {
-    return { ok: false, message: 'URL o API key de Prowlarr no configurados' };
+  if (!prowlarr_url) {
+    return { ok: false, message: 'PROWLARR_URL no configurado' };
+  }
+  if (!prowlarr_api_key) {
+    return { ok: false, message: 'API key de Prowlarr vacía — se sincroniza al arrancar o cópiala de :19696 → Settings' };
   }
   try {
     const base = prowlarr_url.replace(/\/+$/, '');
@@ -584,6 +587,9 @@ export async function testProwlarrConnection(): Promise<{ ok: boolean; message: 
       headers: { 'X-Api-Key': prowlarr_api_key },
       signal: AbortSignal.timeout(8000),
     });
+    if (res.status === 401) {
+      return { ok: false, message: 'Prowlarr API key incorrecta (401)' };
+    }
     if (!res.ok) return { ok: false, message: `Prowlarr HTTP ${res.status}` };
     const indexers = (await res.json()) as Array<{ name?: string; enable?: boolean }>;
     const active = indexers.filter(i => i.enable !== false).length;
@@ -600,11 +606,16 @@ export async function testJackettConnection(): Promise<{ ok: boolean; message: s
   }
   try {
     const base = jackett_url.replace(/\/+$/, '');
-    const res = await fetch(`${base}/api/v2.0/indexers/all/results/torznab/api?apikey=${jackett_api_key}&t=indexers`, {
+    const res = await fetch(`${base}/api/v2.0/indexers?apikey=${encodeURIComponent(jackett_api_key)}`, {
       signal: AbortSignal.timeout(8000),
     });
+    if (res.status === 401) {
+      return { ok: false, message: 'Jackett API key incorrecta (401)' };
+    }
     if (!res.ok) return { ok: false, message: `Jackett HTTP ${res.status}` };
-    return { ok: true, message: 'Conectado correctamente' };
+    const indexers = (await res.json()) as Array<{ name?: string; configured?: boolean }>;
+    const active = indexers.filter(i => i.configured !== false).length;
+    return { ok: true, message: `Conectado · ${active} indexadores configurados` };
   } catch (err) {
     return { ok: false, message: err instanceof Error ? err.message : 'No se pudo conectar' };
   }

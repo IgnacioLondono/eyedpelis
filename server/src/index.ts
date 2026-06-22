@@ -16,6 +16,7 @@ import filesRoutes from './routes/files.js';
 import { ensureMediaDirs, scanLibrary, scheduleBackgroundEnrich } from './services/scanner.js';
 import { startDownloadProcessor } from './services/downloadManager.js';
 import { getSetting, applyEnvDefaults } from './db/database.js';
+import { syncIntegrationApiKeys } from './services/integrationsSync.js';
 import { initAuth, authMiddleware } from './services/auth.js';
 
 dotenv.config();
@@ -39,6 +40,7 @@ app.use(express.json());
 
 await initAuth();
 applyEnvDefaults();
+syncIntegrationApiKeys();
 
 app.use('/api/auth', authRoutes);
 app.use(authMiddleware);

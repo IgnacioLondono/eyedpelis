@@ -5,12 +5,29 @@ import {
 import { scanLibrary, scheduleBackgroundEnrich } from '../services/scanner.js';
 import { getSearchCapabilities, pickBestTorrent, searchTorrents, testJackettConnection, testProwlarrConnection } from '../services/torrentSearch.js';
 import { testQbittorrentConnection } from '../services/qbittorrent.js';
+import { testAllIntegrations, testFlareSolverrConnection } from '../services/integrationsTest.js';
+import { syncIntegrationApiKeys } from '../services/integrationsSync.js';
+import { verifyAllIndexers } from '../services/indexerVerify.js';
 import type { MediaType } from '../types.js';
 
 const router = Router();
 
 router.get('/capabilities', (_req, res) => {
   res.json(getSearchCapabilities());
+});
+
+router.get('/test/flaresolverr', async (_req, res) => {
+  res.json(await testFlareSolverrConnection());
+});
+
+router.get('/test/all', async (_req, res) => {
+  syncIntegrationApiKeys();
+  res.json(await testAllIntegrations());
+});
+
+router.get('/test/indexers', async (_req, res) => {
+  syncIntegrationApiKeys();
+  res.json(await verifyAllIndexers());
 });
 
 router.get('/test/qbittorrent', async (_req, res) => {

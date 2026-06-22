@@ -100,6 +100,27 @@ export const api = {
   testProwlarr: () => request<{ ok: boolean; message: string }>('/downloads/test/prowlarr'),
   testJackett: () => request<{ ok: boolean; message: string }>('/downloads/test/jackett'),
   testQbittorrent: () => request<{ ok: boolean; message: string }>('/downloads/test/qbittorrent'),
+  testAllIntegrations: () => request<{
+    qbittorrent: { ok: boolean; message: string };
+    prowlarr: { ok: boolean; message: string };
+    jackett: { ok: boolean; message: string };
+    flaresolverr: { ok: boolean; message: string };
+    indexers: {
+      checks: Array<{ name: string; ok: boolean; message: string; source: string }>;
+      summary: { total: number; ok: number; failed: number };
+      prowlarr: { ok: boolean; message: string };
+      jackett: { ok: boolean; message: string };
+      public: { ok: boolean; message: string };
+    };
+    webUrls: Record<string, string>;
+  }>('/downloads/test/all'),
+  testIndexers: () => request<{
+    checks: Array<{ name: string; ok: boolean; message: string; source: string }>;
+    summary: { total: number; ok: number; failed: number };
+    prowlarr: { ok: boolean; message: string };
+    jackett: { ok: boolean; message: string };
+    public: { ok: boolean; message: string };
+  }>('/downloads/test/indexers'),
   addDownload: (data: Record<string, unknown>) =>
     request<import('./types').DownloadItem>('/downloads', {
       method: 'POST',

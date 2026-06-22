@@ -54,10 +54,18 @@ services:
       - JACKETT_API_KEY=${JACKETT_API_KEY:-}
       - JELLYFIN_URL=${JELLYFIN_URL:-}
       - JELLYFIN_API_KEY=${JELLYFIN_API_KEY:-}
+      - FLARESOLVERR_URL=http://flaresolverr:8191
+      - PUBLIC_HOST=${PUBLIC_HOST:-192.168.50.197}
+      - QBIT_HOST_PORT=${QBIT_HOST_PORT:-18787}
+      - PROWLARR_HOST_PORT=${PROWLARR_HOST_PORT:-19696}
+      - JACKETT_HOST_PORT=${JACKETT_HOST_PORT:-19117}
+      - FLARESOLVERR_HOST_PORT=${FLARESOLVERR_HOST_PORT:-18191}
     volumes:
       - ${MEDIA_PATH:-/srv/dev-disk-by-uuid-a5b4e34c-5e9b-430c-93ad-0473fe6143d2/data/Videos}:/media
       - ${DOWNLOADS_PATH:-/srv/dev-disk-by-uuid-a5b4e34c-5e9b-430c-93ad-0473fe6143d2/data/Downloads}:/downloads
       - ./data:/app/server/data
+      - ./data/prowlarr:/integration/prowlarr:ro
+      - ./data/jackett:/integration/jackett:ro
     networks:
       - eyedpelis-net
 
@@ -95,10 +103,24 @@ services:
     networks:
       - eyedpelis-net
 
+  prowlarr-config:
+    image: alpine:3.20
+    container_name: eyedpelis-prowlarr-config
+    restart: "no"
+    volumes:
+      - ./data/prowlarr:/config
+      - ./docker/prowlarr-init.sh:/init.sh:ro
+    entrypoint: ["/bin/sh", "/init.sh"]
+    networks:
+      - eyedpelis-net
+
   prowlarr:
     image: lscr.io/linuxserver/prowlarr:latest
     container_name: eyedpelis-prowlarr
     restart: unless-stopped
+    depends_on:
+      prowlarr-config:
+        condition: service_completed_successfully
     environment:
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
