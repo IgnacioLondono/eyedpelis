@@ -1,4 +1,4 @@
-# Stack para Portainer — Eyedpelis
+# Eyedpelis + qBittorrent — para Portainer con Git (compose path: docker-compose.yml)
 services:
   eyedpelis:
     build: .
@@ -17,10 +17,32 @@ services:
       - ADMIN_USER=${ADMIN_USER:-eyedpelis}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-Eyedpelis2026!}
       - AUTH_ENABLED=${AUTH_ENABLED:-true}
-      - CLIENT_URL=${CLIENT_URL:-http://localhost:3001}
+      - CLIENT_URL=${CLIENT_URL:-http://192.168.50.197:3001}
     volumes:
       - /srv/dev-disk-by-uuid-a5b4e34c-5e9b-430c-93ad-0473fe6143d2/data/Videos:/media
+      - /srv/dev-disk-by-uuid-a5b4e34c-5e9b-430c-93ad-0473fe6143d2/data/Downloads:/downloads
       - ./data:/app/server/data
+    networks:
+      - eyedpelis-net
+    depends_on:
+      - qbittorrent
+
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:latest
+    container_name: qbittorrent
+    restart: unless-stopped
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Madrid
+      - WEBUI_PORT=8080
+    volumes:
+      - ./qbittorrent-config:/config
+      - /srv/dev-disk-by-uuid-a5b4e34c-5e9b-430c-93ad-0473fe6143d2/data/Downloads:/downloads
+    ports:
+      - "8080:8080"
+      - "6881:6881"
+      - "6881:6881/udp"
     networks:
       - eyedpelis-net
 

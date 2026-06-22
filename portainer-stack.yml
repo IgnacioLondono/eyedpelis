@@ -1,11 +1,6 @@
 # ============================================================
-# EYEDPELIS — Stack para Portainer (OpenMediaVault)
-# ============================================================
-# 1. Portainer → Stacks → Add stack
-# 2. Nombre: eyedpelis
-# 3. Web editor → pegar TODO este archivo
-# 4. Editar TMDB_API_KEY y CLIENT_URL
-# 5. Deploy the stack
+# EYEDPELIS — Solo si NO usas Git en Portainer (ruta manual)
+# Si despliegas desde GitHub → usa docker-compose.yml del repo
 # ============================================================
 
 services:
@@ -28,12 +23,32 @@ services:
       ADMIN_USER: "eyedpelis"
       ADMIN_PASSWORD: "Eyedpelis2026!"
       AUTH_ENABLED: "true"
-      CLIENT_URL: "http://192.168.1.100:3001"
+      CLIENT_URL: "http://192.168.50.197:3001"
     volumes:
-      # Tu carpeta Videos — lectura/escritura (gestión desde Archivos en la app)
       - /srv/dev-disk-by-uuid-a5b4e34c-5e9b-430c-93ad-0473fe6143d2/data/Videos:/media
-      # Datos de la app (separado de tus videos)
+      - /srv/dev-disk-by-uuid-a5b4e34c-5e9b-430c-93ad-0473fe6143d2/data/Downloads:/downloads
       - /opt/eyedpelis/data:/app/server/data
+    networks:
+      - eyedpelis-net
+    depends_on:
+      - qbittorrent
+
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:latest
+    container_name: qbittorrent
+    restart: unless-stopped
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: "Europe/Madrid"
+      WEBUI_PORT: "8080"
+    volumes:
+      - /opt/eyedpelis/qbittorrent-config:/config
+      - /srv/dev-disk-by-uuid-a5b4e34c-5e9b-430c-93ad-0473fe6143d2/data/Downloads:/downloads
+    ports:
+      - "8080:8080"
+      - "6881:6881"
+      - "6881:6881/udp"
     networks:
       - eyedpelis-net
 
