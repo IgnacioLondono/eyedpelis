@@ -1,16 +1,29 @@
-# Eyedpelis — Portainer con Git (compose path: docker-compose.yml)
+# Eyedpelis — Stack completo (app + descargas + indexadores)
+# Portainer: deploy desde Git, compose path: docker-compose.yml
 #
-# Servicios externos (stack jellyfinn u otro): deben compartir red jellyfinn_default.
-# IMPORTANTE qBittorrent: dentro de Docker usa el PUERTO INTERNO del contenedor (suele ser 8080),
-# NO el puerto del host (8787). Ejemplo: http://qbittorrent:8080
+# Servicios incluidos:
+#   eyedpelis     → https://eyedmovies.eyedcomun.me (puerto 3001)
+#   qbittorrent   → Web UI puerto 8787
+#   prowlarr      → puerto 9696
+#   jackett       → puerto 9117
+#   flaresolverr  → puerto 8191 (para indexadores con Cloudflare)
 #
-# Variables en Portainer → Stack → Environment o archivo .env junto al stack.
+# Tras el primer arranque:
+#   1. Prowlarr → Settings → General → copia API Key → PROWLARR_API_KEY en Portainer
+#   2. Jackett  → copia API Key de la portada → JACKETT_API_KEY en Portainer
+#   3. Prowlarr → Indexers → Add indexer (1337x, Nyaa, etc.)
+#   4. Prowlarr → Settings → FlareSolverr URL: http://flaresolverr:8191
+#   5. qBittorrent → Options → Downloads → guardar en /downloads
+#   6. Redeploy del stack tras poner las API keys
 
 services:
   eyedpelis:
     build: .
     container_name: eyedpelis
     restart: unless-stopped
+    depends_on:
+      - qbittorrent
+      - prowlarr
     ports:
       - "3001:3001"
     environment:
@@ -25,31 +38,84 @@ services:
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-Eyedpelis2026!}
       - AUTH_ENABLED=${AUTH_ENABLED:-true}
       - CLIENT_URL=${CLIENT_URL:-https://eyedmovies.eyedcomun.me}
-      # --- qBittorrent (contenedor del stack jellyfinn) ---
-      - QBITTORRENT_URL=${QBITTORRENT_URL:-http://qbittorrent:8080}
+      - QBITTORRENT_URL=http://qbittorrent:8080
       - QBITTORRENT_USER=${QBITTORRENT_USER:-admin}
       - QBITTORRENT_PASS=${QBITTORRENT_PASS:-adminadmin}
-      # --- Prowlarr (opcional, mismo stack) ---
-      - PROWLARR_URL=${PROWLARR_URL:-http://prowlarr:9696}
+      - PROWLARR_URL=http://prowlarr:9696
       - PROWLARR_API_KEY=${PROWLARR_API_KEY:-}
-      # --- Jackett (opcional, alternativa a Prowlarr) ---
-      - JACKETT_URL=${JACKETT_URL:-}
+      - JACKETT_URL=http://jackett:9117
       - JACKETT_API_KEY=${JACKETT_API_KEY:-}
-      # --- Jellyfin (opcional, metadatos) ---
-      - JELLYFIN_URL=${JELLYFIN_URL:-http://jellyfin:8096}
+      - JELLYFIN_URL=${JELLYFIN_URL:-}
       - JELLYFIN_API_KEY=${JELLYFIN_API_KEY:-}
     volumes:
-      - /srv/dev-disk-by-uuid-a5b4e34c-5e9b-430c-93ad-0473fe6143d2/data/Videos:/media
-      - /srv/dev-disk-by-uuid-a5b4e34c-5e9b-430c-93ad-0473fe6143d2/data/Downloads:/downloads
+      - ${MEDIA_PATH:-/srv/dev-disk-by-uuid-a5b4e34c-5e9b-430c-93ad-0473fe6143d2/data/Videos}:/media
+      - ${DOWNLOADS_PATH:-/srv/dev-disk-by-uuid-a5b4e34c-5e9b-430c-93ad-0473fe6143d2/data/Downloads}:/downloads
       - ./data:/app/server/data
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     networks:
       - eyedpelis-net
-      - jellyfinn_default
+
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:latest
+    container_name: eyedpelis-qbittorrent
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-Europe/Madrid}
+      - WEBUI_PORT=8080
+      - TORRENTING_PORT=6881
+    ports:
+      - "8787:8080"
+      - "6881:6881"
+      - "6881:6881/udp"
+    volumes:
+      - ${DOWNLOADS_PATH:-/srv/dev-disk-by-uuid-a5b4e34c-5e9b-430c-93ad-0473fe6143d2/data/Downloads}:/downloads
+      - ./data/qbittorrent:/config
+    networks:
+      - eyedpelis-net
+
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:latest
+    container_name: eyedpelis-prowlarr
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-Europe/Madrid}
+    ports:
+      - "9696:9696"
+    volumes:
+      - ./data/prowlarr:/config
+    networks:
+      - eyedpelis-net
+
+  jackett:
+    image: lscr.io/linuxserver/jackett:latest
+    container_name: eyedpelis-jackett
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-Europe/Madrid}
+    ports:
+      - "9117:9117"
+    volumes:
+      - ./data/jackett:/config
+    networks:
+      - eyedpelis-net
+
+  flaresolverr:
+    image: flaresolverr/flaresolverr:latest
+    container_name: eyedpelis-flaresolverr
+    restart: unless-stopped
+    environment:
+      - LOG_LEVEL=info
+      - TZ=${TZ:-Europe/Madrid}
+    ports:
+      - "8191:8191"
+    networks:
+      - eyedpelis-net
 
 networks:
   eyedpelis-net:
     driver: bridge
-  jellyfinn_default:
-    external: true

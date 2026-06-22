@@ -228,7 +228,7 @@ export default function SettingsPage() {
             <h2 className="text-lg font-semibold">Descargas (qBittorrent + indexadores)</h2>
           </div>
           <p className="text-sm text-gray-400 mb-4">
-            qBittorrent gestiona los torrents. Si ya tienes uno en otro stack (p. ej. jellyfinn), usa su URL interna.
+            Stack Docker: qBittorrent (:8787), Prowlarr (:9696) y Jackett (:9117) van en el mismo compose.
             Prowlarr o Jackett amplían la búsqueda automática a cientos de indexadores.
           </p>
           <div className="space-y-4">
@@ -238,7 +238,7 @@ export default function SettingsPage() {
                 type="text"
                 value={settings.qbittorrent_url}
                 onChange={e => update('qbittorrent_url', e.target.value)}
-                placeholder="http://qbittorrent:8787"
+                placeholder="http://qbittorrent:8080"
                 className="w-full bg-surface border border-surface-border rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-accent"
               />
               <p className="text-xs text-gray-500 mt-1">
