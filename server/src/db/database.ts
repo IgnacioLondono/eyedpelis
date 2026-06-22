@@ -113,8 +113,13 @@ export function getMediaById(id: number): MediaItem | undefined {
   return item;
 }
 
+export function normalizeMediaPath(filePath: string): string {
+  return path.resolve(filePath).replace(/\\/g, '/');
+}
+
 export function getMediaByPath(filePath: string): MediaItem | undefined {
-  return getDb().media.find(m => m.file_path === filePath);
+  const norm = normalizeMediaPath(filePath);
+  return getDb().media.find(m => m.file_path && normalizeMediaPath(m.file_path) === norm);
 }
 
 export function insertDownload(item: Omit<DownloadItem, 'id' | 'created_at' | 'updated_at'>): DownloadItem {

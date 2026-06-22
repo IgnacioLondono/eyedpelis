@@ -273,6 +273,9 @@ export default function Downloads() {
                 placeholder="Ej: Dragon Ball Z"
                 className="w-full bg-surface border border-surface-border rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-accent"
               />
+              <p className="text-xs text-gray-500 mt-1">
+                Ruta: Series/{subfolder || '…'}/archivo.mkv — idealmente con S01E01 en el nombre del archivo.
+              </p>
             </div>
           )}
         </div>

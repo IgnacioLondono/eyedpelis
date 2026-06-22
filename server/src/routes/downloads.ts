@@ -103,7 +103,8 @@ router.post('/:id/finalize', async (req, res) => {
       return res.status(400).json({ error: 'folder debe ser "movies" o "series"' });
     }
     const destPath = await finalizeDownload(id, folder, subfolder);
-    const scan = await scanLibrary({ enrich: false });
+    const scanScope = folder === 'series' ? 'series' : 'movie';
+    const scan = await scanLibrary({ enrich: false, scope: scanScope });
     scheduleBackgroundEnrich();
     res.json({ ok: true, path: destPath, scan });
   } catch (err) {

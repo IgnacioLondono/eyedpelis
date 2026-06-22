@@ -2,12 +2,12 @@ import fs from 'fs';
 import path from 'path';
 import {
   persist, insertMedia, updateMedia, deleteMediaByPath,
-  findMedia, getMediaByPath,
+  findMedia, getMediaByPath, normalizeMediaPath,
 } from '../db/database.js';
 import { getMoviesPath, getSeriesPath, isMediaReadOnly } from '../config.js';
 import { enrichFromTmdb, tmdbMetadataWithGenres } from './tmdb.js';
 import { findAllSubtitles } from './subtitles.js';
-import { parseWithFolderContext } from './filenameParser.js';
+import { parseWithFolderContext, normalizeTitleKey, seriesFolderFromPath } from './filenameParser.js';
 import {
   getEnrichPromise, getScanStatus, isScanRunning, setEnrichPromise, setScanProgress,
 } from './scanState.js';
@@ -34,17 +34,28 @@ export interface ScanOptions {
   onProgress?: (current: number, total: number, label: string) => void;
 }
 
-function walkDir(dir: string, type: MediaType, results: ParsedFile[] = [], parentFolder: string | null = null): ParsedFile[] {
-  if (!fs.existsSync(dir)) return results;
+function normalizeStoredPath(p: string): string {
+  return normalizeMediaPath(p);
+}
 
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    const fullPath = path.join(dir, entry.name);
+function walkDir(baseDir: string, currentDir: string, type: MediaType, results: ParsedFile[] = []): ParsedFile[] {
+  if (!fs.existsSync(currentDir)) return results;
+
+  const normBase = baseDir.replace(/\\/g, '/');
+
+  for (const entry of fs.readdirSync(currentDir, { withFileTypes: true })) {
+    const fullPath = path.join(currentDir, entry.name);
     if (entry.isDirectory()) {
-      walkDir(fullPath, type, results, entry.name);
+      walkDir(baseDir, fullPath, type, results);
     } else if (entry.isFile() && VIDEO_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) {
-      const parsed = parseWithFolderContext(entry.name, parentFolder, type);
+      const normFull = fullPath.replace(/\\/g, '/');
+      const relDir = path.dirname(path.relative(normBase, normFull)).replace(/\\/g, '/');
+      const seriesFolder = type === 'series' && relDir && relDir !== '.'
+        ? relDir.split('/')[0]
+        : null;
+      const parsed = parseWithFolderContext(entry.name, seriesFolder, type);
       results.push({
-        filePath: fullPath.replace(/\\/g, '/'),
+        filePath: normalizeStoredPath(fullPath),
         fileName: entry.name,
         fileSize: fs.statSync(fullPath).size,
         type,
@@ -56,6 +67,83 @@ function walkDir(dir: string, type: MediaType, results: ParsedFile[] = [], paren
     }
   }
   return results;
+}
+
+function findSeriesParent(title: string): MediaItem | undefined {
+  const key = normalizeTitleKey(title);
+  return findMedia(m =>
+    m.type === 'series' && !m.file_path &&
+    normalizeTitleKey(m.title) === key,
+  )[0];
+}
+
+async function getOrCreateSeriesParent(
+  title: string,
+  year: number | undefined,
+  enrich: boolean,
+  cache: Map<string, number>,
+): Promise<number> {
+  const cacheKey = `${normalizeTitleKey(title)}|${year ?? ''}`;
+  if (cache.has(cacheKey)) return cache.get(cacheKey)!;
+
+  const existing = findSeriesParent(title);
+  if (existing) {
+    cache.set(cacheKey, existing.id);
+    return existing.id;
+  }
+
+  const stubFile: ParsedFile = {
+    filePath: '',
+    fileName: title,
+    fileSize: 0,
+    type: 'series',
+    title,
+    year,
+  };
+
+  const seriesMeta = enrich
+    ? await applyTmdbToItem(stubFile, await fetchTmdbForFile(stubFile))
+    : basicFileMeta(stubFile);
+
+  const created = insertMedia({
+    tmdb_id: seriesMeta.tmdb_id ?? null,
+    type: 'series',
+    title: seriesMeta.title ?? title,
+    original_title: seriesMeta.original_title ?? null,
+    overview: seriesMeta.overview ?? null,
+    poster_path: seriesMeta.poster_path ?? null,
+    backdrop_path: seriesMeta.backdrop_path ?? null,
+    release_date: seriesMeta.release_date ?? null,
+    vote_average: seriesMeta.vote_average ?? null,
+    genres: seriesMeta.genres ?? null,
+    file_path: null,
+    file_size: null,
+    duration: null,
+    season: null,
+    episode: null,
+    series_id: null,
+    status: 'available',
+    subtitles: [],
+  });
+  cache.set(cacheKey, created.id);
+  return created.id;
+}
+
+async function resolveSeriesId(
+  file: ParsedFile,
+  seriesPath: string,
+  cache: Map<string, number>,
+  enrich: boolean,
+): Promise<number | null> {
+  if (file.type !== 'series') return Promise.resolve(null);
+
+  const folder = seriesFolderFromPath(file.filePath, seriesPath);
+  const seriesTitle = folder
+    ? parseWithFolderContext(folder, null, 'series').title || folder
+    : file.title;
+
+  if (!seriesTitle) return null;
+  return getOrCreateSeriesParent(seriesTitle, file.year, enrich, cache);
 }
 
 export async function enrichMissingMetadata(
@@ -160,8 +248,8 @@ export async function scanLibrary(options?: ScanOptions): Promise<ScanResult> {
   const seriesPath = getSeriesPath();
 
   const files: ParsedFile[] = [];
-  if (scope === 'all' || scope === 'movie') files.push(...walkDir(moviesPath, 'movie'));
-  if (scope === 'all' || scope === 'series') files.push(...walkDir(seriesPath, 'series'));
+  if (scope === 'all' || scope === 'movie') walkDir(moviesPath, moviesPath, 'movie', files);
+  if (scope === 'all' || scope === 'series') walkDir(seriesPath, seriesPath, 'series', files);
 
   const existing = findMedia(m => {
     if (!m.file_path) return false;
@@ -183,9 +271,19 @@ export async function scanLibrary(options?: ScanOptions): Promise<ScanResult> {
     const existingItem = getMediaByPath(file.filePath);
 
     if (existingItem) {
-      const updates = enrich
+      const updates: Partial<MediaItem> = enrich
         ? await enrichExistingItem(file, existingItem)
         : { file_size: file.fileSize, subtitles: subs };
+
+      if (file.type === 'series') {
+        const seriesId = await resolveSeriesId(file, seriesPath, seriesCache, enrich);
+        if (seriesId) {
+          updates.series_id = seriesId;
+          if (file.season != null) updates.season = file.season;
+          if (file.episode != null) updates.episode = file.episode;
+        }
+      }
+
       updateMedia(existingItem.id, updates);
       updated++;
       continue;
@@ -195,51 +293,9 @@ export async function scanLibrary(options?: ScanOptions): Promise<ScanResult> {
       ? await applyTmdbToItem(file, await fetchTmdbForFile(file))
       : basicFileMeta(file);
 
-    let seriesId: number | null = null;
-
-    if (file.type === 'series' && file.season !== undefined) {
-      const seriesKey = `${file.title.toLowerCase()}|${file.year ?? ''}`;
-      if (!seriesCache.has(seriesKey)) {
-        const parent = findMedia(m =>
-          m.type === 'series' && !m.file_path &&
-          m.title.toLowerCase() === file.title.toLowerCase(),
-        )[0];
-
-        if (parent) {
-          seriesCache.set(seriesKey, parent.id);
-        } else {
-          const seriesMeta = enrich
-            ? await applyTmdbToItem(
-              { ...file, type: 'series', season: undefined, episode: undefined },
-              await fetchTmdbForFile({ ...file, type: 'series' }),
-            )
-            : basicFileMeta(file);
-
-          const created = insertMedia({
-            tmdb_id: seriesMeta.tmdb_id ?? null,
-            type: 'series',
-            title: seriesMeta.title ?? file.title,
-            original_title: seriesMeta.original_title ?? null,
-            overview: seriesMeta.overview ?? null,
-            poster_path: seriesMeta.poster_path ?? null,
-            backdrop_path: seriesMeta.backdrop_path ?? null,
-            release_date: seriesMeta.release_date ?? null,
-            vote_average: seriesMeta.vote_average ?? null,
-            genres: seriesMeta.genres ?? null,
-            file_path: null,
-            file_size: null,
-            duration: null,
-            season: null,
-            episode: null,
-            series_id: null,
-            status: 'available',
-            subtitles: [],
-          });
-          seriesCache.set(seriesKey, created.id);
-        }
-      }
-      seriesId = seriesCache.get(seriesKey)!;
-    }
+    const seriesId = file.type === 'series'
+      ? await resolveSeriesId(file, seriesPath, seriesCache, enrich)
+      : null;
 
     insertMedia({
       tmdb_id: meta.tmdb_id ?? null,
@@ -279,8 +335,43 @@ export async function scanLibrary(options?: ScanOptions): Promise<ScanResult> {
     }, scope);
   }
 
+  if (scope === 'all' || scope === 'series') {
+    await repairOrphanEpisodes(seriesPath, enrich, seriesCache);
+  }
+
   persist();
   return { added, updated, removed, total: files.length };
+}
+
+async function repairOrphanEpisodes(
+  seriesPath: string,
+  enrich: boolean,
+  cache: Map<string, number>,
+) {
+  const orphans = findMedia(m => m.type === 'series' && !!m.file_path && !m.series_id);
+  for (const item of orphans) {
+    if (!item.file_path) continue;
+    const folder = seriesFolderFromPath(item.file_path, seriesPath);
+    const parsed = parseWithFolderContext(path.basename(item.file_path), folder, 'series');
+    const file: ParsedFile = {
+      filePath: normalizeStoredPath(item.file_path),
+      fileName: path.basename(item.file_path),
+      fileSize: item.file_size ?? 0,
+      type: 'series',
+      title: parsed.title,
+      year: parsed.year,
+      season: parsed.season ?? item.season ?? undefined,
+      episode: parsed.episode ?? item.episode ?? undefined,
+    };
+    const seriesId = await resolveSeriesId(file, seriesPath, cache, enrich);
+    if (!seriesId) continue;
+    updateMedia(item.id, {
+      series_id: seriesId,
+      season: file.season ?? null,
+      episode: file.episode ?? null,
+      title: parsed.title,
+    });
+  }
 }
 
 let enrichTimer: ReturnType<typeof setTimeout> | null = null;
