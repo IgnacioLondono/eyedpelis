@@ -2,7 +2,7 @@ import LibraryToolbar, { useLibraryPage } from '../components/LibraryToolbar';
 import LibraryMediaGrid from '../components/LibraryMediaGrid';
 
 export default function Movies() {
-  const { filters, setFilters, items, filterOptions, loading, error } = useLibraryPage('movie');
+  const { filters, setFilters, items, filterOptions, loading, error, viewMode, setViewMode } = useLibraryPage('movie');
 
   return (
     <div className="p-6">
@@ -14,6 +14,8 @@ export default function Movies() {
         options={filterOptions}
         loading={loading}
         resultCount={loading ? undefined : items.length}
+        viewMode={viewMode}
+        onViewModeChange={setViewMode}
       />
 
       {loading ? (
@@ -34,11 +36,7 @@ export default function Movies() {
           <p>No hay películas con esos filtros.</p>
         </div>
       ) : (
-        <LibraryMediaGrid
-          items={items}
-          showPlay
-          alphabetIndex={filters.sort === 'title' && !filters.search}
-        />
+        <LibraryMediaGrid items={items} showPlay viewMode={viewMode} />
       )}
     </div>
   );

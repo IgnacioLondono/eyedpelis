@@ -4,6 +4,9 @@ import { getSettings } from '../config.js';
 
 const VIDEO_EXT = new Set(['.mkv', '.mp4', '.avi', '.mov', '.wmv', '.m4v', '.webm', '.ts', '.m2ts']);
 const SUB_EXT = new Set(['.srt', '.vtt', '.ass', '.ssa']);
+export const UPLOAD_ALLOWED_EXT = new Set([...VIDEO_EXT, ...SUB_EXT, '.nfo']);
+
+export const MAX_UPLOAD_BYTES = parseInt(process.env.UPLOAD_MAX_BYTES || '', 10) || 100 * 1024 * 1024 * 1024;
 
 export interface FileEntry {
   name: string;
@@ -146,6 +149,39 @@ function sanitizeName(name: string): string {
     throw new Error('Nombre no válido');
   }
   return trimmed;
+}
+
+export function sanitizeUploadFilename(originalName: string): string {
+  const base = path.basename(originalName.replace(/\\/g, '/'));
+  const safe = sanitizeName(base);
+  const ext = path.extname(safe).toLowerCase();
+  if (!UPLOAD_ALLOWED_EXT.has(ext)) {
+    throw new Error(`Extensión no permitida (${ext || 'sin extensión'})`);
+  }
+  return safe;
+}
+
+export function assertUploadTarget(relativePath = ''): string {
+  if (isMediaReadOnly()) throw new Error('Almacenamiento en solo lectura');
+  const dir = resolveMediaPath(relativePath);
+  if (!fs.existsSync(dir)) throw new Error('Carpeta no encontrada');
+  if (!fs.statSync(dir).isDirectory()) throw new Error('La ruta destino no es una carpeta');
+  return dir;
+}
+
+export function entryFromAbsolute(full: string): FileEntry {
+  const stat = fs.statSync(full);
+  const name = path.basename(full);
+  const ext = stat.isFile() ? path.extname(name) : null;
+  return {
+    name,
+    path: toRelativePath(full),
+    type: stat.isDirectory() ? 'directory' : 'file',
+    size: stat.isFile() ? stat.size : 0,
+    modified: stat.mtime.toISOString(),
+    extension: ext || null,
+    category: stat.isDirectory() ? 'other' : categorize(ext),
+  };
 }
 
 export function formatBytes(bytes: number): string {

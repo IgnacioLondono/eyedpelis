@@ -1,20 +1,24 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle,
   ChevronRight,
+  Download,
   File,
   FileVideo,
   Film,
   Folder,
   FolderPlus,
+  HardDrive,
   Home,
   Pencil,
   RefreshCw,
   Trash2,
   Tv,
+  Upload,
 } from 'lucide-react';
 import { api, formatBytes } from '../api';
 import Modal from '../components/Modal';
+import type { LibraryStats } from '../types';
 
 interface FileEntry {
   name: string;
@@ -39,6 +43,8 @@ function EntryIcon({ entry }: { entry: FileEntry }) {
   if (entry.category === 'subtitle') return <File size={20} className="text-blue-400 shrink-0" />;
   return <File size={20} className="text-gray-500 shrink-0" />;
 }
+
+const UPLOAD_ACCEPT = '.mkv,.mp4,.avi,.mov,.wmv,.m4v,.webm,.ts,.m2ts,.srt,.vtt,.ass,.ssa,.nfo';
 
 function formatModified(iso: string) {
   return new Date(iso).toLocaleString('es-ES', {
@@ -70,6 +76,14 @@ export default function FileManager() {
   const [deleteLoading, setDeleteLoading] = useState(false);
 
   const [scanning, setScanning] = useState(false);
+  const [stats, setStats] = useState<LibraryStats | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadLabel, setUploadLabel] = useState('');
+  const [dragOver, setDragOver] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const readOnly = info?.readOnly ?? false;
 
   const loadDir = useCallback(async (path: string) => {
     setLoading(true);
@@ -87,6 +101,7 @@ export default function FileManager() {
 
   useEffect(() => {
     api.getFilesInfo().then(setInfo).catch(console.error);
+    api.getStats().then(setStats).catch(console.error);
     loadDir('');
   }, [loadDir]);
 
@@ -161,6 +176,7 @@ export default function FileManager() {
     try {
       const res = await api.scanFilesLibrary();
       showMsg(`Escaneo: ${res.total} archivos (+${res.added}, -${res.removed})`);
+      api.getStats().then(setStats).catch(console.error);
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Error');
     } finally {
@@ -168,7 +184,35 @@ export default function FileManager() {
     }
   }
 
-  const readOnly = info?.readOnly ?? false;
+  async function handleUploadFiles(fileList: FileList | File[]) {
+    const files = Array.from(fileList);
+    if (!files.length || readOnly || uploading) return;
+
+    setUploading(true);
+    setUploadProgress(0);
+    setUploadLabel(files.length === 1 ? files[0].name : `${files.length} archivos`);
+
+    try {
+      const res = await api.uploadFiles(currentPath, files, setUploadProgress);
+      showMsg(`Subida completada — biblioteca: +${res.scan.added} nuevo(s)`);
+      loadDir(currentPath);
+      api.getStats().then(setStats).catch(console.error);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Error al subir');
+    } finally {
+      setUploading(false);
+      setUploadProgress(0);
+      setUploadLabel('');
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  }
+
+  function onDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setDragOver(false);
+    if (readOnly || uploading) return;
+    if (e.dataTransfer.files.length) handleUploadFiles(e.dataTransfer.files);
+  }
 
   return (
     <div className="p-6 md:p-8 max-w-6xl mx-auto animate-fade-in">
@@ -202,17 +246,39 @@ export default function FileManager() {
             Escanear biblioteca
           </button>
           {!readOnly && (
-            <button
-              type="button"
-              onClick={() => setMkdirOpen(true)}
-              className="btn-primary flex items-center gap-2 text-sm"
-            >
-              <FolderPlus size={16} />
-              Nueva carpeta
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading}
+                className="btn-primary flex items-center gap-2 text-sm"
+              >
+                <Upload size={16} />
+                Subir archivos
+              </button>
+              <button
+                type="button"
+                onClick={() => setMkdirOpen(true)}
+                className="btn-secondary flex items-center gap-2 text-sm"
+              >
+                <FolderPlus size={16} />
+                Nueva carpeta
+              </button>
+            </>
           )}
         </div>
       </div>
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        accept={UPLOAD_ACCEPT}
+        className="hidden"
+        onChange={e => {
+          if (e.target.files?.length) handleUploadFiles(e.target.files);
+        }}
+      />
 
       {readOnly && (
         <div className="mb-4 flex items-start gap-3 p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-sm">
@@ -222,7 +288,7 @@ export default function FileManager() {
             <p className="text-amber-200/80 mt-1">
               El volumen está montado como <code className="text-amber-100">:ro</code> o{' '}
               <code className="text-amber-100">MEDIA_READ_ONLY=true</code>. Cambia la configuración de Docker para
-              permitir editar, renombrar y eliminar.
+              permitir subir, editar, renombrar y eliminar.
             </p>
           </div>
         </div>
@@ -231,6 +297,26 @@ export default function FileManager() {
       {actionMsg && (
         <div className="mb-4 p-3 rounded-lg bg-green-500/15 border border-green-500/30 text-green-300 text-sm">
           {actionMsg}
+        </div>
+      )}
+
+      {stats && (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+          {[
+            { icon: Film, label: 'Películas', value: stats.totalMovies, color: 'text-purple-400' },
+            { icon: Tv, label: 'Series', value: stats.totalSeries, color: 'text-violet-400' },
+            { icon: HardDrive, label: 'Almacenamiento', value: formatBytes(stats.totalSize), color: 'text-fuchsia-400' },
+            { icon: Download, label: 'Descargas activas', value: stats.activeDownloads, color: 'text-accent-glow' },
+          ].map(({ icon: Icon, label, value, color }) => (
+            <div
+              key={label}
+              className="bg-surface-card border border-purple-500/15 rounded-xl p-4 hover:border-purple-500/30 transition-colors"
+            >
+              <Icon size={18} className={`${color} mb-2`} />
+              <p className="text-xl md:text-2xl font-bold tabular-nums">{value}</p>
+              <p className="text-xs text-gray-500 mt-0.5">{label}</p>
+            </div>
+          ))}
         </div>
       )}
 
@@ -281,11 +367,57 @@ export default function FileManager() {
         })}
       </nav>
 
+      {uploading && (
+        <div className="mb-4 p-4 rounded-xl bg-accent/10 border border-accent/30">
+          <div className="flex items-center justify-between gap-3 mb-2 text-sm">
+            <span className="text-accent-glow font-medium truncate">Subiendo {uploadLabel}</span>
+            <span className="text-gray-400 tabular-nums shrink-0">{uploadProgress}%</span>
+          </div>
+          <div className="h-2 rounded-full bg-black/40 overflow-hidden">
+            <div
+              className="h-full bg-gradient-to-r from-accent to-accent-glow transition-all duration-300"
+              style={{ width: `${uploadProgress}%` }}
+            />
+          </div>
+        </div>
+      )}
+
       {error && (
         <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-red-300 text-sm mb-4">{error}</div>
       )}
 
-      <div className="bg-surface-card border border-purple-500/15 rounded-2xl overflow-hidden">
+      <div
+        className={`bg-surface-card border rounded-2xl overflow-hidden transition-colors ${
+          dragOver ? 'border-accent bg-accent/5' : 'border-purple-500/15'
+        }`}
+        onDragOver={e => { e.preventDefault(); if (!readOnly) setDragOver(true); }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={onDrop}
+      >
+        {!readOnly && (
+          <div
+            className={`px-4 py-6 border-b border-purple-500/10 text-center transition-colors ${
+              dragOver ? 'bg-accent/10' : 'bg-surface/40'
+            }`}
+          >
+            <Upload size={28} className={`mx-auto mb-2 ${dragOver ? 'text-accent-glow' : 'text-gray-500'}`} />
+            <p className="text-sm text-gray-400">
+              Arrastra películas, episodios o subtítulos aquí
+            </p>
+            <p className="text-xs text-gray-600 mt-1">
+              MKV, MP4, AVI, MOV, SRT, VTT… · carpeta: {currentPath || '(raíz)'}
+            </p>
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+              className="mt-3 text-sm text-accent-glow hover:text-accent underline-offset-2 hover:underline disabled:opacity-50"
+            >
+              o selecciona archivos
+            </button>
+          </div>
+        )}
+
         {currentPath && (
           <button
             type="button"
@@ -303,7 +435,9 @@ export default function FileManager() {
             Cargando...
           </div>
         ) : entries.length === 0 ? (
-          <div className="p-12 text-center text-gray-500">Carpeta vacía</div>
+          <div className="p-12 text-center text-gray-500">
+            {readOnly ? 'Carpeta vacía' : 'Carpeta vacía — sube archivos con el botón de arriba'}
+          </div>
         ) : (
           <ul className="divide-y divide-purple-500/10">
             {entries.map(entry => (

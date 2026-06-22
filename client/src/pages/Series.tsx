@@ -2,7 +2,7 @@ import LibraryToolbar, { useLibraryPage } from '../components/LibraryToolbar';
 import LibraryMediaGrid from '../components/LibraryMediaGrid';
 
 export default function Series() {
-  const { filters, setFilters, items, filterOptions, loading, error } = useLibraryPage('series');
+  const { filters, setFilters, items, filterOptions, loading, error, viewMode, setViewMode } = useLibraryPage('series');
 
   return (
     <div className="p-6">
@@ -14,6 +14,8 @@ export default function Series() {
         options={filterOptions}
         loading={loading}
         resultCount={loading ? undefined : items.length}
+        viewMode={viewMode}
+        onViewModeChange={setViewMode}
       />
 
       {loading ? (
@@ -32,10 +34,7 @@ export default function Series() {
       ) : items.length === 0 ? (
         <p className="text-gray-400 text-center py-20">No hay series con esos filtros.</p>
       ) : (
-        <LibraryMediaGrid
-          items={items}
-          alphabetIndex={filters.sort === 'title' && !filters.search}
-        />
+        <LibraryMediaGrid items={items} viewMode={viewMode} />
       )}
     </div>
   );

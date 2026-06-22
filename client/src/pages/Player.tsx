@@ -37,7 +37,9 @@ export default function Player() {
         setProbeAudioTracks(streamInfo.probe.audioTracks);
         setPreferredAudioIndex(streamInfo.probe.recommendedAudioIndex);
         setKnownDuration(streamInfo.probe.duration ?? null);
-        setNeedsAudioCompat(!streamInfo.probe.browserFriendlyAudio);
+        setNeedsAudioCompat(streamInfo.probe.needsCompatAudio ?? !streamInfo.probe.browserFriendlyAudio);
+      } else {
+        setNeedsAudioCompat(true);
       }
 
       if (item.series_id && item.season != null && item.episode != null) {

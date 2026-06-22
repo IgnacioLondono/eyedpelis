@@ -103,6 +103,7 @@ router.get('/:id/info', async (req, res) => {
         codecLabel: codecLabel(t.codec),
       })),
       videoCodecLabel: probe.videoCodec ? codecLabel(probe.videoCodec) : null,
+      needsCompatAudio: probe.needsCompatAudio,
     } : null,
   });
 });
@@ -130,6 +131,7 @@ router.get('/:id/compat-audio', async (req, res) => {
     '-map', audioMap,
     '-vn',
     '-c:a', 'aac', '-b:a', '192k', '-ac', '2', '-ar', '48000',
+    '-af', 'aresample=async=1:first_pts=0',
     '-f', 'mp4',
     '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
     'pipe:1',

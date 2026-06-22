@@ -1,7 +1,25 @@
 import { useEffect, useState } from 'react';
-import { Search as SearchIcon, SlidersHorizontal, X } from 'lucide-react';
+import { Search as SearchIcon, SlidersHorizontal, X, LayoutGrid, List, BookA } from 'lucide-react';
 import { api } from '../api';
 import type { MediaItem } from '../types';
+
+export type LibraryViewMode = 'grid' | 'alphabet' | 'list';
+
+const VIEW_STORAGE_KEY = 'library-view-mode';
+
+export const viewModeOptions: { id: LibraryViewMode; icon: typeof LayoutGrid; label: string }[] = [
+  { id: 'grid', icon: LayoutGrid, label: 'Cuadrícula' },
+  { id: 'alphabet', icon: BookA, label: 'Abecedario' },
+  { id: 'list', icon: List, label: 'Lista' },
+];
+
+function loadViewMode(): LibraryViewMode {
+  try {
+    const v = localStorage.getItem(VIEW_STORAGE_KEY);
+    if (v === 'grid' || v === 'alphabet' || v === 'list') return v;
+  } catch { /* ignore */ }
+  return 'grid';
+}
 
 export interface LibraryFilters {
   search: string;
@@ -28,6 +46,8 @@ interface Props {
   options: FilterOptions;
   loading?: boolean;
   resultCount?: number;
+  viewMode: LibraryViewMode;
+  onViewModeChange: (mode: LibraryViewMode) => void;
 }
 
 function useDebouncedValue<T>(value: T, delay = 350): T {
@@ -39,7 +59,7 @@ function useDebouncedValue<T>(value: T, delay = 350): T {
   return debounced;
 }
 
-export default function LibraryToolbar({ filters, onChange, options, loading, resultCount }: Props) {
+export default function LibraryToolbar({ filters, onChange, options, loading, resultCount, viewMode, onViewModeChange }: Props) {
   const [searchInput, setSearchInput] = useState(filters.search);
   const debouncedSearch = useDebouncedValue(searchInput);
 
@@ -122,6 +142,28 @@ export default function LibraryToolbar({ filters, onChange, options, loading, re
               <X size={14} /> Limpiar
             </button>
           )}
+
+          <div className="hidden sm:block w-px h-8 bg-surface-border mx-1" />
+
+          <div className="flex items-center rounded-lg border border-surface-border bg-surface-card p-0.5" role="group" aria-label="Modo de vista">
+            {viewModeOptions.map(({ id, icon: Icon, label }) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => onViewModeChange(id)}
+                title={label}
+                className={`p-2 rounded-md transition-all ${
+                  viewMode === id
+                    ? 'bg-accent/20 text-accent-glow shadow-sm'
+                    : 'text-gray-500 hover:text-white hover:bg-surface-hover'
+                }`}
+                aria-label={label}
+                aria-pressed={viewMode === id}
+              >
+                <Icon size={18} />
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -130,6 +172,7 @@ export default function LibraryToolbar({ filters, onChange, options, loading, re
           {resultCount} {resultCount === 1 ? 'resultado' : 'resultados'}
           {filters.genre && <span> · Género: <span className="text-accent-glow">{filters.genre}</span></span>}
           {filters.year && <span> · Año: {filters.year}</span>}
+          <span className="hidden sm:inline text-gray-600"> · Vista: {viewModeOptions.find(v => v.id === viewMode)?.label}</span>
         </p>
       )}
     </div>
@@ -138,6 +181,7 @@ export default function LibraryToolbar({ filters, onChange, options, loading, re
 
 export function useLibraryPage(type: 'movie' | 'series') {
   const [filters, setFilters] = useState<LibraryFilters>(defaultLibraryFilters);
+  const [viewMode, setViewMode] = useState<LibraryViewMode>(loadViewMode);
   const [items, setItems] = useState<MediaItem[]>([]);
   const [filterOptions, setFilterOptions] = useState<{ genres: string[]; years: number[] }>({ genres: [], years: [] });
   const [loading, setLoading] = useState(true);
@@ -146,6 +190,12 @@ export function useLibraryPage(type: 'movie' | 'series') {
   useEffect(() => {
     api.getLibraryFilters(type).then(setFilterOptions).catch(console.error);
   }, [type]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(VIEW_STORAGE_KEY, viewMode);
+    } catch { /* ignore */ }
+  }, [viewMode]);
 
   useEffect(() => {
     setLoading(true);
@@ -166,5 +216,5 @@ export function useLibraryPage(type: 'movie' | 'series') {
       .finally(() => setLoading(false));
   }, [type, filters]);
 
-  return { filters, setFilters, items, filterOptions, loading, error };
+  return { filters, setFilters, items, filterOptions, loading, error, viewMode, setViewMode };
 }

@@ -9,6 +9,8 @@ export interface MediaProbeResult {
   audioTracks: Array<{ index: number; streamIndex: number; codec: string; language: string; channels: number }>;
   videoCodec: string | null;
   browserFriendlyAudio: boolean;
+  /** Requiere audio transcodificado (split o mux): códec incompatible, varias pistas o pista recomendada ≠ predeterminada del navegador */
+  needsCompatAudio: boolean;
   recommendedAudioIndex: number;
   duration: number | null;
 }
@@ -44,6 +46,7 @@ export async function probeMedia(filePath: string): Promise<MediaProbeResult | n
         audioTracks: [],
         videoCodec: videoStream?.codec_name ?? null,
         browserFriendlyAudio: false,
+        needsCompatAudio: true,
         recommendedAudioIndex: 0,
         duration,
       };
@@ -57,33 +60,38 @@ export async function probeMedia(filePath: string): Promise<MediaProbeResult | n
       channels: s.channels || 0,
     }));
 
-    const browserFriendlyAudio = audioTracks.some(t =>
-      BROWSER_AUDIO_CODECS.has(t.codec.toLowerCase()),
-    );
+    const isFriendly = (codec: string) => BROWSER_AUDIO_CODECS.has(codec.toLowerCase());
+
+    const browserFriendlyAudio = audioTracks.some(t => isFriendly(t.codec));
+    const firstTrackFriendly = audioTracks.length > 0 && isFriendly(audioTracks[0].codec);
 
     const preferLang = ['spa', 'es', 'eng', 'en', 'jpn', 'ja'];
-    let recommended = audioTracks.findIndex(t => BROWSER_AUDIO_CODECS.has(t.codec.toLowerCase()));
-    if (recommended < 0) recommended = 0;
+    let recommended = 0;
 
     for (const lang of preferLang) {
-      const idx = audioTracks.findIndex(
-        t => t.language.toLowerCase().startsWith(lang) && BROWSER_AUDIO_CODECS.has(t.codec.toLowerCase()),
-      );
+      const idx = audioTracks.findIndex(t => t.language.toLowerCase().startsWith(lang));
       if (idx >= 0) {
         recommended = idx;
         break;
       }
     }
 
-    if (recommended < 0) {
-      const anyFriendly = audioTracks.findIndex(t => BROWSER_AUDIO_CODECS.has(t.codec.toLowerCase()));
-      recommended = anyFriendly >= 0 ? anyFriendly : 0;
+    if (!audioTracks.some(t => t.language.toLowerCase().startsWith(preferLang[0]))) {
+      const friendlyIdx = audioTracks.findIndex(t => isFriendly(t.codec));
+      if (friendlyIdx >= 0) recommended = friendlyIdx;
     }
+
+    const needsCompatAudio =
+      !browserFriendlyAudio ||
+      audioTracks.length > 1 ||
+      recommended !== 0 ||
+      !firstTrackFriendly;
 
     return {
       audioTracks,
       videoCodec: videoStream?.codec_name ?? null,
       browserFriendlyAudio,
+      needsCompatAudio,
       recommendedAudioIndex: recommended,
       duration,
     };

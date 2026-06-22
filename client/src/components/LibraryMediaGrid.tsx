@@ -1,18 +1,24 @@
 import { useMemo } from 'react';
 import MediaCard from './MediaCard';
+import MediaListRow from './MediaListRow';
+import AlphabetIndex from './AlphabetIndex';
 import type { MediaItem } from '../types';
+import type { LibraryViewMode } from './LibraryToolbar';
 import { groupByLetter } from '../utils/alphabet';
 
 interface Props {
   items: MediaItem[];
   showPlay?: boolean;
-  /** Muestra índice A-Z cuando la lista está ordenada por título */
-  alphabetIndex?: boolean;
+  viewMode: LibraryViewMode;
 }
 
-function PlainGrid({ items, showPlay }: { items: MediaItem[]; showPlay?: boolean }) {
+function GridView({ items, showPlay, cols = 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6' }: {
+  items: MediaItem[];
+  showPlay?: boolean;
+  cols?: string;
+}) {
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+    <div className={`grid ${cols} gap-4`}>
       {items.map((m, i) => (
         <MediaCard key={m.id} item={m} libraryId={m.id} showPlay={showPlay} index={i} />
       ))}
@@ -20,55 +26,79 @@ function PlainGrid({ items, showPlay }: { items: MediaItem[]; showPlay?: boolean
   );
 }
 
-export default function LibraryMediaGrid({ items, showPlay, alphabetIndex = false }: Props) {
+function ListView({ items, showPlay }: { items: MediaItem[]; showPlay?: boolean }) {
+  return (
+    <div className="space-y-2 max-w-4xl">
+      {items.map(m => (
+        <MediaListRow key={m.id} item={m} showPlay={showPlay} />
+      ))}
+    </div>
+  );
+}
+
+function AlphabetSections({
+  groups,
+  showPlay,
+  innerView,
+}: {
+  groups: { letter: string; items: MediaItem[] }[];
+  showPlay?: boolean;
+  innerView: 'grid' | 'list';
+}) {
+  return (
+    <div className="space-y-10 pr-8 md:pr-10">
+      {groups.map(({ letter, items: sectionItems }) => (
+        <section key={letter} id={`lib-letter-${letter}`} className="scroll-mt-28 md:scroll-mt-8">
+          <h2 className="sticky top-16 md:top-4 z-20 mb-4 inline-flex items-center justify-center min-w-[2.25rem] h-9 px-2 rounded-xl bg-accent/15 text-accent-glow font-bold text-lg border border-accent/25 backdrop-blur-md shadow-sm">
+            {letter}
+          </h2>
+          {innerView === 'list' ? (
+            <div className="space-y-2 max-w-4xl">
+              {sectionItems.map(m => (
+                <MediaListRow key={m.id} item={m} showPlay={showPlay} />
+              ))}
+            </div>
+          ) : (
+            <GridView items={sectionItems} showPlay={showPlay} />
+          )}
+        </section>
+      ))}
+    </div>
+  );
+}
+
+export default function LibraryMediaGrid({ items, showPlay, viewMode }: Props) {
   const groups = useMemo(
-    () => (alphabetIndex && items.length >= 12 ? groupByLetter(items) : null),
-    [items, alphabetIndex],
+    () => (viewMode === 'alphabet' ? groupByLetter(items) : null),
+    [items, viewMode],
   );
 
+  if (viewMode === 'list') {
+    return <ListView items={items} showPlay={showPlay} />;
+  }
+
+  if (viewMode === 'grid') {
+    return <GridView items={items} showPlay={showPlay} />;
+  }
+
+  // alphabet — con secciones + índice lateral fijo (portal)
   if (!groups || groups.length <= 1) {
-    return <PlainGrid items={items} showPlay={showPlay} />;
+    return (
+      <>
+        {groups && groups.length === 1 && (
+          <p className="text-xs text-gray-500 mb-4">Una sola letra — mostrando cuadrícula</p>
+        )}
+        <GridView items={items} showPlay={showPlay} />
+      </>
+    );
   }
 
   const letters = groups.map(g => g.letter);
 
-  const scrollToLetter = (letter: string) => {
-    document.getElementById(`lib-letter-${letter}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  };
-
   return (
-    <div className="relative">
-      <nav
-        className="fixed right-1 md:right-4 top-1/2 -translate-y-1/2 z-30 flex flex-col items-center gap-px py-2 px-1 rounded-full bg-black/50 backdrop-blur-md border border-white/10 shadow-lg select-none"
-        aria-label="Índice alfabético"
-      >
-        {letters.map(letter => (
-          <button
-            key={letter}
-            type="button"
-            onClick={() => scrollToLetter(letter)}
-            className="w-5 h-[18px] md:h-5 flex items-center justify-center text-[9px] md:text-[10px] font-bold text-white/45 hover:text-accent-glow hover:scale-110 transition-all"
-            title={`Ir a ${letter}`}
-          >
-            {letter}
-          </button>
-        ))}
-      </nav>
-
-      <div className="space-y-8 pr-6 md:pr-8">
-        {groups.map(({ letter, items: sectionItems }) => (
-          <section key={letter} id={`lib-letter-${letter}`} className="scroll-mt-24">
-            <h2 className="sticky top-0 z-20 mb-4 inline-flex items-center justify-center w-9 h-9 rounded-xl bg-accent/15 text-accent-glow font-bold text-lg border border-accent/20 backdrop-blur-sm">
-              {letter}
-            </h2>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-              {sectionItems.map((m, i) => (
-                <MediaCard key={m.id} item={m} libraryId={m.id} showPlay={showPlay} index={i} />
-              ))}
-            </div>
-          </section>
-        ))}
-      </div>
-    </div>
+    <>
+      <AlphabetIndex letters={letters} />
+      <AlphabetSections groups={groups} showPlay={showPlay} innerView="grid" />
+    </>
   );
 }

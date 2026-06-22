@@ -114,7 +114,9 @@ export const api = {
     }),
   scanLibrary: () => request<{ added: number; updated: number; removed: number; total: number }>('/settings/scan', { method: 'POST' }),
   getFilesInfo: () =>
-    request<{ mediaPath: string; moviesPath: string; seriesPath: string; readOnly: boolean }>('/files/info'),
+    request<{ mediaPath: string; moviesPath: string; seriesPath: string; readOnly: boolean; maxUploadBytes?: number }>(
+      '/files/info',
+    ),
   listFiles: (path = '') =>
     request<{ path: string; entries: Array<{
       name: string; path: string; type: 'file' | 'directory'; size: number;
@@ -142,6 +144,49 @@ export const api = {
     ),
   scanFilesLibrary: () =>
     request<{ added: number; updated: number; removed: number; total: number }>('/files/scan', { method: 'POST' }),
+  uploadFiles: (folderPath: string, files: File[], onProgress?: (percent: number) => void) =>
+    new Promise<{
+      entries: Array<{ name: string; path: string; size: number }>;
+      scan: { added: number; updated: number; removed: number; total: number };
+    }>((resolve, reject) => {
+      const form = new FormData();
+      for (const f of files) form.append('files', f);
+
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `${API}/files/upload?path=${encodeURIComponent(folderPath)}`);
+      if (authToken) xhr.setRequestHeader('Authorization', `Bearer ${authToken}`);
+
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable && onProgress) {
+          onProgress(Math.round((e.loaded / e.total) * 100));
+        }
+      };
+
+      xhr.onload = () => {
+        if (xhr.status === 401) {
+          setAuthToken(null);
+          window.location.reload();
+          reject(new Error('No autenticado'));
+          return;
+        }
+        try {
+          const data = JSON.parse(xhr.responseText) as { error?: string; entries?: unknown[]; scan?: unknown };
+          if (xhr.status >= 200 && xhr.status < 300) {
+            resolve(data as {
+              entries: Array<{ name: string; path: string; size: number }>;
+              scan: { added: number; updated: number; removed: number; total: number };
+            });
+          } else {
+            reject(new Error(data.error || 'Error al subir'));
+          }
+        } catch {
+          reject(new Error('Error al subir'));
+        }
+      };
+
+      xhr.onerror = () => reject(new Error('Error de red'));
+      xhr.send(form);
+    }),
   reEnrichMetadata: () => request<{ enriched: number }>('/settings/re-enrich', { method: 'POST' }),
   testJellyfin: () => request<{ ok: boolean; message: string }>('/integrations/jellyfin/test'),
   testPlex: () => request<{ ok: boolean; message: string }>('/integrations/plex/test'),
@@ -164,6 +209,7 @@ export const api = {
       subtitles: Array<{ index?: number; label: string; language: string; embedded?: boolean }>;
       probe: {
         browserFriendlyAudio: boolean;
+        needsCompatAudio?: boolean;
         recommendedAudioIndex: number;
         duration: number | null;
         audioTracks: Array<{ index: number; codec: string; codecLabel: string; language: string }>;

@@ -49,6 +49,13 @@
   .input-field {
     @apply transition-all duration-300 ease-out focus:scale-[1.01] focus:shadow-purple;
   }
+  .scrollbar-none {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

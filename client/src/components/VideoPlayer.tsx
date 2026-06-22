@@ -201,7 +201,11 @@ export default function VideoPlayer({
   const videoSrc = isTranscode ? playback.muxSrc! : playback.videoSrc;
 
   const audioOptions = useMemo(() =>
-    probeAudioTracks.map(t => ({ index: t.index, label: langLabel(t.language), language: t.language })),
+    probeAudioTracks.map(t => ({
+      index: t.index,
+      label: t.codecLabel ? `${langLabel(t.language)} · ${t.codecLabel}` : langLabel(t.language),
+      language: t.language,
+    })),
   [probeAudioTracks]);
 
   const subtitleOptions = subtitles.map(s => ({ index: s.index, label: s.label }));
@@ -326,9 +330,11 @@ export default function VideoPlayer({
   const selectAudio = (idx: number) => {
     if (idx === playback.audioIndex) { setShowLangMenu(false); return; }
     const t = timeRef.current;
-    if (isSplit && compatAudioSrc) reloadAudio(t, idx);
-    else if (isTranscode || needsAudioCompat) goTranscode(idx, t);
-    else setPlayback(p => ({ ...p, audioIndex: idx }));
+    if (compatAudioSrc) {
+      reloadAudio(t, idx);
+    } else if (compatSrc) {
+      goTranscode(idx, t);
+    }
     setShowLangMenu(false);
   };
 
@@ -345,12 +351,15 @@ export default function VideoPlayer({
     const split = playbackRef.current?.engine === 'split';
     if (v.paused) {
       tryPlay(v);
-      if (a && split) tryPlay(a);
+      if (a && split) {
+        syncAudioElement();
+        tryPlay(a);
+      }
     } else {
       v.pause();
       a?.pause();
     }
-  }, []);
+  }, [syncAudioElement]);
 
   const toggleMute = useCallback(() => {
     setMuted(m => !m);
@@ -432,21 +441,27 @@ export default function VideoPlayer({
     const a = audioRef.current;
     if (v) {
       v.playbackRate = playbackRate;
-      v.muted = isSplit || isTranscode || muted;
-      if (!isSplit) { v.volume = volume; v.muted = muted; }
+      // Solo silenciar el vídeo en modo split (audio va en <audio> aparte)
+      if (isSplit) {
+        v.muted = true;
+        v.volume = 0;
+      } else {
+        v.volume = volume;
+        v.muted = muted;
+      }
     }
     if (a) {
       a.volume = volume;
       a.muted = muted;
       a.playbackRate = playbackRate;
     }
-  }, [volume, playbackRate, muted, isSplit, isTranscode]);
+  }, [volume, playbackRate, muted, isSplit]);
 
   useEffect(() => {
     if (!isSplit) return;
-    const id = window.setInterval(syncAudioElement, 800);
+    const id = window.setInterval(syncAudioElement, 400);
     return () => clearInterval(id);
-  }, [isSplit, syncAudioElement]);
+  }, [isSplit, syncAudioElement, playback.audioSrc]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -491,9 +506,14 @@ export default function VideoPlayer({
         poster={poster}
         className="w-full h-full object-contain"
         playsInline
-        autoPlay
-        muted={isSplit || isTranscode || muted}
-        onPlay={() => { setPlaying(true); if (!audioReloadingRef.current) setBuffering(false); syncAudioElement(); }}
+        autoPlay={!isSplit}
+        muted={isSplit || muted}
+        onPlay={() => {
+          setPlaying(true);
+          if (!audioReloadingRef.current) setBuffering(false);
+          syncAudioElement();
+          if (isSplit && audioRef.current) tryPlay(audioRef.current);
+        }}
         onPause={() => { setPlaying(false); setShowControls(true); audioRef.current?.pause(); }}
         onWaiting={() => { if (!audioReloadingRef.current) setBuffering(true); }}
         onCanPlay={() => { setBuffering(false); tryPlay(videoRef.current!); }}
@@ -520,8 +540,12 @@ export default function VideoPlayer({
             goTranscode(pb.audioIndex, timeRef.current);
             return;
           }
-          if (pb?.engine === 'direct' && compatSrc && needsAudioCompat) {
-            goTranscode(preferredAudioIndex, 0);
+          if (pb?.engine === 'direct' && compatAudioSrc && needsAudioCompat) {
+            reloadAudio(timeRef.current, pb.audioIndex);
+            return;
+          }
+          if (pb?.engine === 'direct' && compatSrc) {
+            goTranscode(preferredAudioIndex, timeRef.current);
             return;
           }
           setError('No se pudo reproducir el video.');
@@ -534,13 +558,14 @@ export default function VideoPlayer({
           ref={audioRef}
           src={playback.audioSrc}
           className="hidden"
-          autoPlay
           onCanPlay={() => {
             audioReloadingRef.current = false;
             syncAudioElement();
             const v = videoRef.current;
-            if (v && !v.paused) tryPlay(audioRef.current!);
+            const a = audioRef.current;
+            if (v && a && !v.paused) tryPlay(a);
           }}
+          onPlaying={() => { audioReloadingRef.current = false; }}
           onError={() => {
             audioReloadingRef.current = false;
             const pb = playbackRef.current;
