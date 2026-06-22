@@ -105,9 +105,12 @@ export interface ScanResult {
   total: number;
 }
 
+export type ScanScope = 'all' | 'movie' | 'series';
+
 export interface ScanStatus {
   running: boolean;
   phase: 'idle' | 'indexing' | 'enriching' | 'done';
+  scope: ScanScope;
   current: number;
   total: number;
   message: string;

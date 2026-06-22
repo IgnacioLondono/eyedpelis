@@ -1,13 +1,19 @@
 import { useRef, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 import Modal from './Modal';
-import type { ScanStatus } from '../types';
+import type { ScanScope, ScanStatus } from '../types';
 
 interface Props {
   open: boolean;
   status: ScanStatus | null;
   onClose: () => void;
 }
+
+const scopeTitle: Record<ScanScope, string> = {
+  all: 'Escaneando biblioteca',
+  movie: 'Escaneando películas',
+  series: 'Escaneando series',
+};
 
 const phaseLabel: Record<ScanStatus['phase'], string> = {
   idle: 'Preparando...',
@@ -23,8 +29,10 @@ export default function ScanProgressModal({ open, status, onClose }: Props) {
 
   const canClose = status && !status.running && status.phase === 'done';
 
+  const title = status?.scope ? scopeTitle[status.scope] : scopeTitle.all;
+
   return (
-    <Modal open={open} onClose={canClose ? onClose : () => {}} title="Escaneando biblioteca" maxWidth="max-w-md">
+    <Modal open={open} onClose={canClose ? onClose : () => {}} title={title} maxWidth="max-w-md">
       <div className="space-y-4">
         <div className="flex items-center gap-3 text-sm text-gray-300">
           <RefreshCw size={18} className={status?.running ? 'animate-spin text-accent shrink-0' : 'text-green-400 shrink-0'} />
@@ -89,6 +97,7 @@ export function useScanProgress(pollFn: () => Promise<ScanStatus>) {
     setStatus({
       running: true,
       phase: 'indexing',
+      scope: 'all',
       current: 0,
       total: 0,
       message: 'Iniciando...',
@@ -109,6 +118,7 @@ export function useScanProgress(pollFn: () => Promise<ScanStatus>) {
       const failed: ScanStatus = {
         running: false,
         phase: 'done',
+        scope: 'all',
         current: 0,
         total: 0,
         message: '',

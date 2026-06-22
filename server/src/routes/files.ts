@@ -16,8 +16,13 @@ import {
   sanitizeUploadFilename,
   UPLOAD_ALLOWED_EXT,
 } from '../services/filesystem.js';
-import { scanLibrary, scheduleBackgroundEnrich, runScanJob } from '../services/scanner.js';
+import { scanLibrary, scheduleBackgroundEnrich, runScanJob, type ScanScope } from '../services/scanner.js';
 import { getScanStatus, isScanRunning } from '../services/scanState.js';
+
+function parseScope(raw: unknown): ScanScope {
+  if (raw === 'movie' || raw === 'series') return raw;
+  return 'all';
+}
 
 const router = Router();
 
@@ -139,12 +144,13 @@ router.delete('/', async (req, res) => {
   }
 });
 
-router.post('/scan', async (_req, res) => {
+router.post('/scan', async (req, res) => {
   try {
+    const scope = parseScope(req.query.scope);
     if (isScanRunning()) {
       return res.json({ started: false, ...getScanStatus() });
     }
-    runScanJob().catch(console.error);
+    runScanJob(scope).catch(console.error);
     res.json({ started: true, ...getScanStatus() });
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : 'Error al escanear' });

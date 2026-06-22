@@ -1,7 +1,12 @@
 import { Router } from 'express';
 import { setSetting } from '../db/database.js';
-import { scanLibrary, enrichMissingMetadata, runScanJob, scheduleBackgroundEnrich } from '../services/scanner.js';
+import { scanLibrary, enrichMissingMetadata, runScanJob, scheduleBackgroundEnrich, type ScanScope } from '../services/scanner.js';
 import { getScanStatus, isScanRunning } from '../services/scanState.js';
+
+function parseScope(raw: unknown): ScanScope {
+  if (raw === 'movie' || raw === 'series') return raw;
+  return 'all';
+}
 import { getSettings } from '../config.js';
 
 const router = Router();
@@ -32,12 +37,13 @@ router.put('/', (req, res) => {
   res.json({ ok: true });
 });
 
-router.post('/scan', async (_req, res) => {
+router.post('/scan', async (req, res) => {
   try {
+    const scope = parseScope(req.query.scope);
     if (isScanRunning()) {
       return res.json({ started: false, ...getScanStatus() });
     }
-    runScanJob().catch(console.error);
+    runScanJob(scope).catch(console.error);
     res.json({ started: true, ...getScanStatus() });
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : 'Error al escanear' });

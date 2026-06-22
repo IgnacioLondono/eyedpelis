@@ -80,6 +80,7 @@ export default function FileManager() {
   const [deleteLoading, setDeleteLoading] = useState(false);
 
   const [scanning, setScanning] = useState(false);
+  const [scanScope, setScanScope] = useState<'all' | 'movie' | 'series'>('all');
   const [stats, setStats] = useState<LibraryStats | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -177,7 +178,7 @@ export default function FileManager() {
 
   async function handleScan() {
     setScanning(true);
-    const final = await scanProgress.start(() => api.scanFilesLibrary());
+    const final = await scanProgress.start(() => api.scanFilesLibrary(scanScope));
     setScanning(false);
     if (final?.result) {
       api.getStats().then(setStats).catch(console.error);
@@ -242,6 +243,17 @@ export default function FileManager() {
             <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
             Actualizar
           </button>
+          <select
+            value={scanScope}
+            onChange={e => setScanScope(e.target.value as 'all' | 'movie' | 'series')}
+            disabled={scanning}
+            className="bg-surface-card border border-surface-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent"
+            title="Qué indexar"
+          >
+            <option value="all">Todo</option>
+            <option value="movie">Solo películas</option>
+            <option value="series">Solo series</option>
+          </select>
           <button
             type="button"
             onClick={handleScan}
@@ -249,7 +261,7 @@ export default function FileManager() {
             className="btn-secondary flex items-center gap-2 text-sm"
           >
             <RefreshCw size={16} className={scanning ? 'animate-spin' : ''} />
-            Escanear biblioteca
+            Escanear
           </button>
           {!readOnly && (
             <>

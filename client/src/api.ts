@@ -117,8 +117,8 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     }),
-  scanLibrary: () =>
-    request<import('./types').ScanStatus & { started: boolean }>('/settings/scan', { method: 'POST' }),
+  scanLibrary: (scope: import('./types').ScanScope = 'all') =>
+    request<import('./types').ScanStatus & { started: boolean }>(`/settings/scan?scope=${scope}`, { method: 'POST' }),
   getSettingsScanStatus: () => request<import('./types').ScanStatus>('/settings/scan/status'),
   getFilesInfo: () =>
     request<{ mediaPath: string; moviesPath: string; seriesPath: string; readOnly: boolean; maxUploadBytes?: number }>(
@@ -149,8 +149,8 @@ export const api = {
       `/files?path=${encodeURIComponent(path)}`,
       { method: 'DELETE' },
     ),
-  scanFilesLibrary: () =>
-    request<import('./types').ScanStatus & { started: boolean }>('/files/scan', { method: 'POST' }),
+  scanFilesLibrary: (scope: import('./types').ScanScope = 'all') =>
+    request<import('./types').ScanStatus & { started: boolean }>(`/files/scan?scope=${scope}`, { method: 'POST' }),
   getFilesScanStatus: () => request<import('./types').ScanStatus>('/files/scan/status'),
   uploadFiles: (folderPath: string, files: File[], onProgress?: (percent: number) => void) =>
     new Promise<{

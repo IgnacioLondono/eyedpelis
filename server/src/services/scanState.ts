@@ -1,10 +1,11 @@
-import type { ScanResult } from './scanner.js';
+import type { ScanResult, ScanScope } from './scanner.js';
 
 export type ScanPhase = 'idle' | 'indexing' | 'enriching' | 'done';
 
 export interface ScanStatus {
   running: boolean;
   phase: ScanPhase;
+  scope: ScanScope;
   current: number;
   total: number;
   message: string;
@@ -16,6 +17,7 @@ export interface ScanStatus {
 const idle: ScanStatus = {
   running: false,
   phase: 'idle',
+  scope: 'all',
   current: 0,
   total: 0,
   message: '',

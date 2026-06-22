@@ -30,6 +30,7 @@ export default function SettingsPage() {
   });
   const [saving, setSaving] = useState(false);
   const [scanning, setScanning] = useState(false);
+  const [scanScope, setScanScope] = useState<'all' | 'movie' | 'series'>('all');
   const [enriching, setEnriching] = useState(false);
   const [scanResult, setScanResult] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -59,12 +60,13 @@ export default function SettingsPage() {
   async function handleScan() {
     setScanning(true);
     setScanResult(null);
-    const final = await scanProgress.start(() => api.scanLibrary());
+    const final = await scanProgress.start(() => api.scanLibrary(scanScope));
     setScanning(false);
     if (final?.error) {
       setScanResult(final.error);
     } else if (final?.result) {
-      setScanResult(`Escaneo completado: ${final.result.total} archivos (+${final.result.added} nuevos, ${final.result.updated} actualizados, -${final.result.removed} eliminados)`);
+      const label = scanScope === 'movie' ? 'películas' : scanScope === 'series' ? 'series' : 'archivos';
+      setScanResult(`Escaneo de ${label}: ${final.result.total} en disco (+${final.result.added} nuevos, ${final.result.updated} actualizados, -${final.result.removed} eliminados)`);
     }
   }
 
@@ -367,7 +369,17 @@ export default function SettingsPage() {
               Escaneo automático activado
             </label>
           </div>
-          <div className="flex flex-wrap gap-3 mt-4">
+          <div className="flex flex-wrap gap-3 mt-4 items-center">
+            <select
+              value={scanScope}
+              onChange={e => setScanScope(e.target.value as 'all' | 'movie' | 'series')}
+              disabled={scanning || enriching}
+              className="bg-surface border border-surface-border rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-accent"
+            >
+              <option value="all">Todo</option>
+              <option value="movie">Solo películas</option>
+              <option value="series">Solo series</option>
+            </select>
             <button
               type="button"
               onClick={handleScan}
@@ -375,7 +387,7 @@ export default function SettingsPage() {
               className="btn-secondary flex items-center gap-2"
             >
               <RefreshCw size={16} className={scanning ? 'animate-spin' : ''} />
-              {scanning ? 'Escaneando...' : 'Escanear biblioteca ahora'}
+              {scanning ? 'Escaneando...' : 'Escanear ahora'}
             </button>
             <button
               type="button"

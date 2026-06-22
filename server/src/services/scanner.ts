@@ -26,8 +26,11 @@ interface ParsedFile {
   episode?: number;
 }
 
+export type ScanScope = 'all' | 'movie' | 'series';
+
 export interface ScanOptions {
   enrich?: boolean;
+  scope?: ScanScope;
   onProgress?: (current: number, total: number, label: string) => void;
 }
 
@@ -57,8 +60,11 @@ function walkDir(dir: string, type: MediaType, results: ParsedFile[] = [], paren
 
 export async function enrichMissingMetadata(
   onProgress?: (current: number, total: number, label: string) => void,
+  scope: ScanScope = 'all',
 ): Promise<number> {
   const targets = findMedia(m => {
+    if (scope === 'movie' && m.type !== 'movie') return false;
+    if (scope === 'series' && m.type !== 'series') return false;
     if (m.poster_path && m.tmdb_id && m.genres) return false;
     if (m.type === 'movie') return !!m.file_path;
     return !m.file_path;
@@ -136,19 +142,31 @@ export interface ScanResult {
   total: number;
 }
 
+function pathInScope(filePath: string, scope: ScanScope, moviesPath: string, seriesPath: string): boolean {
+  const norm = filePath.replace(/\\/g, '/');
+  const movies = moviesPath.replace(/\\/g, '/');
+  const series = seriesPath.replace(/\\/g, '/');
+  if (scope === 'movie') return norm.startsWith(`${movies}/`);
+  if (scope === 'series') return norm.startsWith(`${series}/`);
+  return norm.startsWith(`${movies}/`) || norm.startsWith(`${series}/`);
+}
+
 export async function scanLibrary(options?: ScanOptions): Promise<ScanResult> {
   const enrich = options?.enrich ?? false;
+  const scope = options?.scope ?? 'all';
 
-  setScanProgress({ message: 'Buscando archivos en disco...' });
+  setScanProgress({ message: 'Buscando archivos en disco...', scope });
   const moviesPath = getMoviesPath();
   const seriesPath = getSeriesPath();
 
-  const files = [
-    ...walkDir(moviesPath, 'movie'),
-    ...walkDir(seriesPath, 'series'),
-  ];
+  const files: ParsedFile[] = [];
+  if (scope === 'all' || scope === 'movie') files.push(...walkDir(moviesPath, 'movie'));
+  if (scope === 'all' || scope === 'series') files.push(...walkDir(seriesPath, 'series'));
 
-  const existing = findMedia(m => m.file_path !== null);
+  const existing = findMedia(m => {
+    if (!m.file_path) return false;
+    return pathInScope(m.file_path, scope, moviesPath, seriesPath);
+  });
   const existingPaths = new Set(existing.map(m => m.file_path!));
   const foundPaths = new Set(files.map(f => f.filePath));
   let added = 0;
@@ -248,7 +266,7 @@ export async function scanLibrary(options?: ScanOptions): Promise<ScanResult> {
 
   let removed = 0;
   for (const existingPath of existingPaths) {
-    if (!foundPaths.has(existingPath)) {
+    if (!foundPaths.has(existingPath) && pathInScope(existingPath, scope, moviesPath, seriesPath)) {
       deleteMediaByPath(existingPath);
       removed++;
     }
@@ -258,7 +276,7 @@ export async function scanLibrary(options?: ScanOptions): Promise<ScanResult> {
     setScanProgress({ phase: 'enriching', message: 'Actualizando metadatos TMDB...' });
     await enrichMissingMetadata((current, total, label) => {
       setScanProgress({ current, total, message: label });
-    });
+    }, scope);
   }
 
   persist();
@@ -310,7 +328,7 @@ export function scheduleBackgroundEnrich() {
   }, 1500);
 }
 
-export async function runScanJob(): Promise<ScanResult> {
+export async function runScanJob(scope: ScanScope = 'all'): Promise<ScanResult> {
   if (isScanRunning()) {
     const status = getScanStatus();
     if (status.result) return status.result;
@@ -320,6 +338,7 @@ export async function runScanJob(): Promise<ScanResult> {
   setScanProgress({
     running: true,
     phase: 'indexing',
+    scope,
     current: 0,
     total: 0,
     message: 'Iniciando escaneo...',
@@ -331,6 +350,7 @@ export async function runScanJob(): Promise<ScanResult> {
   try {
     const result = await scanLibrary({
       enrich: false,
+      scope,
       onProgress: (current, total, label) => {
         setScanProgress({ phase: 'indexing', current, total, message: label });
       },
@@ -339,6 +359,7 @@ export async function runScanJob(): Promise<ScanResult> {
     setScanProgress({
       phase: 'enriching',
       running: true,
+      scope,
       result,
       current: 0,
       total: 0,
@@ -347,7 +368,7 @@ export async function runScanJob(): Promise<ScanResult> {
 
     const enriched = await enrichMissingMetadata((current, total, label) => {
       setScanProgress({ current, total, message: label });
-    });
+    }, scope);
 
     setScanProgress({
       running: false,
