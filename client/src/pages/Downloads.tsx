@@ -1,17 +1,24 @@
-import { useEffect, useState } from 'react';
-import { Trash2, RefreshCw, CheckCircle, XCircle, Clock, Download as DownloadIcon, FolderOpen, Film, Tv } from 'lucide-react';
-import { api, posterUrl, formatBytes } from '../api';
+import { useEffect, useMemo, useState } from 'react';
+import {
+  Trash2, RefreshCw, CheckCircle, XCircle, Clock, Download as DownloadIcon,
+  FolderOpen, Film, Tv, Gauge, Timer, HardDrive,
+} from 'lucide-react';
+import { api, posterUrl, formatBytes, formatSpeed, formatEta } from '../api';
 import Modal from '../components/Modal';
 import type { DownloadItem } from '../types';
 
-const statusConfig: Record<string, { icon: typeof Clock; color: string; label: string }> = {
-  queued: { icon: Clock, color: 'text-gray-400', label: 'En cola' },
-  downloading: { icon: DownloadIcon, color: 'text-blue-400', label: 'Descargando' },
-  awaiting_folder: { icon: FolderOpen, color: 'text-purple-400', label: 'Elige carpeta' },
-  completed: { icon: CheckCircle, color: 'text-green-400', label: 'Completado' },
-  failed: { icon: XCircle, color: 'text-red-400', label: 'Error' },
-  paused: { icon: Clock, color: 'text-yellow-400', label: 'Pausado' },
+const statusConfig: Record<string, { icon: typeof Clock; color: string; label: string; bar?: string }> = {
+  queued: { icon: Clock, color: 'text-gray-400', label: 'En cola', bar: 'bg-gray-500' },
+  downloading: { icon: DownloadIcon, color: 'text-blue-400', label: 'Descargando', bar: 'bg-blue-500' },
+  awaiting_folder: { icon: FolderOpen, color: 'text-purple-400', label: 'Elige carpeta', bar: 'bg-purple-500' },
+  completed: { icon: CheckCircle, color: 'text-green-400', label: 'Completado', bar: 'bg-green-500' },
+  failed: { icon: XCircle, color: 'text-red-400', label: 'Error', bar: 'bg-red-500' },
+  paused: { icon: Clock, color: 'text-yellow-400', label: 'Pausado', bar: 'bg-yellow-500' },
 };
+
+function isActive(d: DownloadItem) {
+  return d.status === 'queued' || d.status === 'downloading' || d.status === 'paused';
+}
 
 export default function Downloads() {
   const [downloads, setDownloads] = useState<DownloadItem[]>([]);
@@ -21,23 +28,32 @@ export default function Downloads() {
   const [finalizing, setFinalizing] = useState(false);
   const [finalizeError, setFinalizeError] = useState<string | null>(null);
   const [dismissedIds, setDismissedIds] = useState<Set<number>>(new Set());
+  const [loading, setLoading] = useState(true);
 
   function load() {
-    api.getDownloads().then(setDownloads).catch(console.error);
+    api.getDownloads()
+      .then(setDownloads)
+      .catch(console.error)
+      .finally(() => setLoading(false));
   }
 
   useEffect(() => {
     load();
-    const interval = setInterval(load, 5000);
+    const interval = setInterval(load, 3000);
     return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
     const pending = downloads.find(d => d.status === 'awaiting_folder' && !dismissedIds.has(d.id));
-    if (pending && !folderModal) {
-      openFolderModal(pending);
-    }
+    if (pending && !folderModal) openFolderModal(pending);
   }, [downloads, folderModal, dismissedIds]);
+
+  const { active, finished } = useMemo(() => ({
+    active: downloads.filter(d => isActive(d) || d.status === 'awaiting_folder'),
+    finished: downloads.filter(d => d.status === 'completed' || d.status === 'failed'),
+  }), [downloads]);
+
+  const activeCount = downloads.filter(d => d.status === 'downloading' || d.status === 'queued').length;
 
   function openFolderModal(item: DownloadItem) {
     setFolderModal(item);
@@ -68,65 +84,137 @@ export default function Downloads() {
     }
   }
 
+  function renderCard(d: DownloadItem) {
+    const cfg = statusConfig[d.status] || statusConfig.queued;
+    const Icon = cfg.icon;
+    const showProgress = d.status === 'downloading' || d.status === 'queued' || d.status === 'paused';
+    const progress = Math.max(0, Math.min(100, d.progress ?? 0));
+
+    return (
+      <div
+        key={d.id}
+        className="bg-surface-card border border-purple-500/15 rounded-2xl p-4 md:p-5 hover:border-purple-500/30 transition-colors"
+      >
+        <div className="flex gap-4">
+          <img
+            src={posterUrl(d.poster_path, 'w200')}
+            alt=""
+            className="w-14 h-20 md:w-16 md:h-24 object-cover rounded-lg flex-shrink-0 ring-1 ring-purple-500/20"
+            onError={(e) => { (e.target as HTMLImageElement).src = '/placeholder-poster.svg'; }}
+          />
+
+          <div className="flex-1 min-w-0">
+            <div className="flex items-start justify-between gap-2 mb-1">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 mb-1">
+                  {d.type === 'movie' ? <Film size={13} className="text-purple-400 shrink-0" /> : <Tv size={13} className="text-violet-400 shrink-0" />}
+                  <span className="text-[10px] uppercase tracking-wider text-gray-500">{d.type === 'movie' ? 'Película' : 'Serie'}</span>
+                </div>
+                <h3 className="font-semibold truncate text-base">{d.title}</h3>
+              </div>
+              <button
+                onClick={() => handleDelete(d.id)}
+                className="p-2 text-gray-500 hover:text-red-400 transition-colors shrink-0"
+                title="Eliminar"
+              >
+                <Trash2 size={18} />
+              </button>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+              <span className={`inline-flex items-center gap-1 ${cfg.color}`}>
+                <Icon size={13} />
+                {cfg.label}
+              </span>
+              {showProgress && (
+                <span className="text-gray-300 font-semibold tabular-nums">{progress}%</span>
+              )}
+              {d.size_bytes != null && d.size_bytes > 0 && (
+                <span className="inline-flex items-center gap-1 text-gray-500">
+                  <HardDrive size={12} />
+                  {formatBytes(d.size_bytes)}
+                </span>
+              )}
+              {d.download_speed != null && d.download_speed > 0 && (
+                <span className="inline-flex items-center gap-1 text-blue-300">
+                  <Gauge size={12} />
+                  {formatSpeed(d.download_speed)}
+                </span>
+              )}
+              {d.eta_seconds != null && d.eta_seconds > 0 && d.status === 'downloading' && (
+                <span className="inline-flex items-center gap-1 text-gray-500">
+                  <Timer size={12} />
+                  {formatEta(d.eta_seconds)}
+                </span>
+              )}
+            </div>
+
+            {showProgress && (
+              <div className="mt-3">
+                <div className="h-2.5 bg-black/40 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all duration-500 ${cfg.bar || 'bg-accent'} ${d.status === 'downloading' ? 'bg-gradient-to-r from-blue-600 to-accent' : ''}`}
+                    style={{ width: `${Math.max(progress, d.status === 'queued' ? 2 : 0)}%` }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {d.status === 'awaiting_folder' && (
+              <button onClick={() => openFolderModal(d)} className="btn-primary text-sm py-2 px-4 mt-3">
+                Elegir carpeta
+              </button>
+            )}
+
+            {d.error_message && (
+              <p className="text-xs text-red-400 mt-2 leading-relaxed">{d.error_message}</p>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="p-6 max-w-4xl mx-auto">
-      <div className="flex items-center justify-between mb-8">
-        <h1 className="text-3xl font-bold">Descargas</h1>
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-3xl font-bold">Descargas</h1>
+          <p className="text-sm text-gray-500 mt-1">
+            {activeCount > 0 ? `${activeCount} activa(s) · actualización cada 3s` : 'Sin descargas activas'}
+          </p>
+        </div>
         <button onClick={load} className="btn-secondary flex items-center gap-2">
-          <RefreshCw size={16} /> Actualizar
+          <RefreshCw size={16} className={loading ? 'animate-spin' : ''} /> Actualizar
         </button>
       </div>
 
       {downloads.length === 0 ? (
-        <div className="text-center py-20 text-gray-400 max-w-lg mx-auto">
+        <div className="text-center py-16 text-gray-400 max-w-lg mx-auto">
           <DownloadIcon size={48} className="mx-auto mb-4 opacity-50" />
-          <p className="mb-4">No hay descargas activas.</p>
+          <p className="mb-4">No hay descargas.</p>
           <div className="text-left text-sm bg-surface-card border border-purple-500/15 rounded-xl p-5 space-y-2">
             <p className="font-semibold text-white">¿Cómo descargar?</p>
-            <p>1. Ve a <strong className="text-accent">Buscar</strong> y encuentra una película o serie en TMDB.</p>
-            <p>2. Pulsa <strong className="text-accent">Descargar</strong> y pega un enlace <strong>magnet</strong> o <strong>URL directa</strong> (Eyedpelis no baja de TMDB solo).</p>
-            <p>3. Cuando termine, elige si va a <strong>Películas</strong> o <strong>Series</strong>.</p>
-            <p className="text-xs text-gray-500 pt-2">Para torrents necesitas qBittorrent configurado en Configuración.</p>
+            <p>1. Ve a <strong className="text-accent">Buscar</strong> y elige una película o serie.</p>
+            <p>2. Pulsa <strong className="text-accent">Descargar</strong> — busca torrents automáticamente.</p>
+            <p>3. Sigue el progreso aquí y elige carpeta al terminar.</p>
+            <p className="text-xs text-gray-500 pt-2">Necesitas qBittorrent en Configuración.</p>
           </div>
         </div>
       ) : (
-        <div className="space-y-3">
-          {downloads.map(d => {
-            const cfg = statusConfig[d.status] || statusConfig.queued;
-            const Icon = cfg.icon;
-            return (
-              <div key={d.id} className="flex items-center gap-4 bg-surface-card border border-surface-border rounded-xl p-4">
-                <img
-                  src={posterUrl(d.poster_path, 'w200')}
-                  alt=""
-                  className="w-12 h-16 object-cover rounded-lg flex-shrink-0"
-                  onError={(e) => { (e.target as HTMLImageElement).src = '/placeholder-poster.svg'; }}
-                />
-                <div className="flex-1 min-w-0">
-                  <h3 className="font-semibold truncate">{d.title}</h3>
-                  <div className="flex items-center gap-2 mt-1">
-                    <Icon size={14} className={cfg.color} />
-                    <span className={`text-xs ${cfg.color}`}>{cfg.label}</span>
-                    {d.size_bytes && <span className="text-xs text-gray-500">· {formatBytes(d.size_bytes)}</span>}
-                  </div>
-                  {d.status === 'downloading' && (
-                    <div className="mt-2 h-1.5 bg-surface rounded-full overflow-hidden">
-                      <div className="h-full bg-accent rounded-full transition-all" style={{ width: `${d.progress}%` }} />
-                    </div>
-                  )}
-                  {d.error_message && <p className="text-xs text-red-400 mt-1">{d.error_message}</p>}
-                </div>
-                {d.status === 'awaiting_folder' && (
-                  <button onClick={() => openFolderModal(d)} className="btn-primary text-sm py-2 px-4">
-                    Elegir carpeta
-                  </button>
-                )}
-                <button onClick={() => handleDelete(d.id)} className="p-2 text-gray-500 hover:text-red-400 transition-colors">
-                  <Trash2 size={18} />
-                </button>
-              </div>
-            );
-          })}
+        <div className="space-y-8">
+          {active.length > 0 && (
+            <section>
+              <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3">En curso</h2>
+              <div className="space-y-3">{active.map(renderCard)}</div>
+            </section>
+          )}
+          {finished.length > 0 && (
+            <section>
+              <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3">Historial</h2>
+              <div className="space-y-3">{finished.map(renderCard)}</div>
+            </section>
+          )}
         </div>
       )}
 
@@ -187,9 +275,7 @@ export default function Downloads() {
           )}
         </div>
 
-        {finalizeError && (
-          <p className="text-sm text-red-400 mt-4">{finalizeError}</p>
-        )}
+        {finalizeError && <p className="text-sm text-red-400 mt-4">{finalizeError}</p>}
 
         <div className="flex gap-3 mt-6">
           <button

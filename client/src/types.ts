@@ -52,7 +52,10 @@ export interface DownloadItem {
   size_bytes: number | null;
   download_path?: string | null;
   error_message: string | null;
+  download_speed?: number | null;
+  eta_seconds?: number | null;
   created_at: string;
+  updated_at?: string;
 }
 
 export interface TorrentResult {

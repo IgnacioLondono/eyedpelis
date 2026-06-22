@@ -7,13 +7,35 @@ import {
 } from '../db/database.js';
 import { getSettings } from '../config.js';
 import type { DownloadItem, MediaType } from '../types.js';
+import {
+  hashFromMagnetOrUrl,
+  isTorrentComplete,
+  isTorrentFailed,
+  isTorrentPaused,
+  normalizeEta,
+  qbAddTorrent,
+  qbFindRecentTorrent,
+  qbGetTorrent,
+  qbLogin,
+  type QbTorrent,
+} from './qbittorrent.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const INCOMING_DIR = path.join(__dirname, '../../data/incoming');
 
+const VIDEO_EXT = new Set(['.mkv', '.mp4', '.avi', '.mov', '.wmv', '.m4v', '.webm', '.ts', '.m2ts']);
+
 function ensureIncomingDir() {
   if (!fs.existsSync(INCOMING_DIR)) fs.mkdirSync(INCOMING_DIR, { recursive: true });
   return INCOMING_DIR;
+}
+
+function emptyDownloadFields() {
+  return {
+    qb_hash: null as string | null,
+    download_speed: null as number | null,
+    eta_seconds: null as number | null,
+  };
 }
 
 export async function addToQueue(params: {
@@ -38,6 +60,7 @@ export async function addToQueue(params: {
     size_bytes: null,
     download_path: null,
     error_message: null,
+    ...emptyDownloadFields(),
   });
 }
 
@@ -55,7 +78,105 @@ export function deleteDownload(id: number) {
 
 export { getDownloadById, getAllDownloads };
 
+function findLargestVideo(dir: string): string | null {
+  const best = { path: null as string | null, size: 0 };
+
+  function walk(current: string) {
+    for (const name of fs.readdirSync(current)) {
+      const full = path.join(current, name);
+      let stat: fs.Stats;
+      try { stat = fs.statSync(full); } catch { continue; }
+      if (stat.isDirectory()) walk(full);
+      else if (VIDEO_EXT.has(path.extname(name).toLowerCase())) {
+        if (stat.size > best.size) {
+          best.size = stat.size;
+          best.path = full;
+        }
+      }
+    }
+  }
+
+  walk(dir);
+  return best.path ? best.path.replace(/\\/g, '/') : null;
+}
+
+function resolveTorrentPath(t: QbTorrent): string | null {
+  const contentPath = t.content_path;
+  if (!contentPath || !fs.existsSync(contentPath)) return null;
+
+  const stat = fs.statSync(contentPath);
+  if (stat.isFile()) return contentPath.replace(/\\/g, '/');
+  return findLargestVideo(contentPath);
+}
+
+function applyTorrentState(item: DownloadItem, t: QbTorrent) {
+  const progress = Math.min(100, Math.round(t.progress * 100));
+  const updates: Partial<DownloadItem> = {
+    progress,
+    size_bytes: t.size,
+    download_speed: t.dlspeed > 0 ? t.dlspeed : null,
+    eta_seconds: normalizeEta(t.eta),
+    qb_hash: t.hash.toLowerCase(),
+  };
+
+  if (isTorrentFailed(t)) {
+    updates.status = 'failed';
+    updates.error_message = `qBittorrent: ${t.state}`;
+    updates.download_speed = null;
+    updates.eta_seconds = null;
+  } else if (isTorrentComplete(t)) {
+    const filePath = resolveTorrentPath(t);
+    if (filePath) {
+      updates.status = 'awaiting_folder';
+      updates.progress = 100;
+      updates.download_path = filePath;
+      updates.download_speed = null;
+      updates.eta_seconds = null;
+    } else {
+      updates.status = 'downloading';
+      updates.progress = 100;
+      updates.error_message = null;
+    }
+  } else if (isTorrentPaused(t)) {
+    updates.status = 'paused';
+  } else {
+    updates.status = 'downloading';
+    updates.error_message = null;
+  }
+
+  updateDownload(item.id, updates);
+}
+
+export async function syncActiveDownloads() {
+  const settings = getSettings();
+  const active = getAllDownloads().filter(d =>
+    (d.status === 'downloading' || d.status === 'paused') &&
+    (d.magnet_url || d.torrent_url),
+  );
+  if (!active.length || !settings.qbittorrent_url) return;
+
+  const session = await qbLogin();
+  if (!session) return;
+
+  for (const item of active) {
+    try {
+      let hash = item.qb_hash || hashFromMagnetOrUrl(item.magnet_url || item.torrent_url || '');
+      let torrent: QbTorrent | null = null;
+
+      if (hash) torrent = await qbGetTorrent(session, hash);
+      if (!torrent) torrent = await qbFindRecentTorrent(session, item.title);
+      if (!torrent) continue;
+
+      applyTorrentState(item, torrent);
+    } catch (err) {
+      console.error(`[sync download ${item.id}]`, err);
+    }
+  }
+}
+
 export async function processQueue() {
+  await syncActiveDownloads();
+
   const queued = getAllDownloads().filter(d => d.status === 'queued').slice(0, 3);
 
   for (const item of queued) {
@@ -77,7 +198,7 @@ export async function processQueue() {
 }
 
 async function downloadDirect(item: DownloadItem) {
-  updateDownload(item.id, { status: 'downloading', progress: 0 });
+  updateDownload(item.id, { status: 'downloading', progress: 0, download_speed: null, eta_seconds: null });
 
   ensureIncomingDir();
   const safeName = item.title.replace(/[^a-zA-Z0-9áéíóúñÁÉÍÓÚÑ\s.-]/g, '').trim() || 'descarga';
@@ -91,15 +212,24 @@ async function downloadDirect(item: DownloadItem) {
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let received = 0;
+  const started = Date.now();
 
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
     chunks.push(value);
     received += value.length;
-    if (total > 0) {
-      updateDownload(item.id, { progress: Math.round((received / total) * 100) });
-    }
+
+    const elapsed = (Date.now() - started) / 1000;
+    const speed = elapsed > 0 ? Math.round(received / elapsed) : null;
+    const eta = total > 0 && speed ? Math.round((total - received) / speed) : null;
+
+    updateDownload(item.id, {
+      progress: total > 0 ? Math.round((received / total) * 100) : 0,
+      size_bytes: total > 0 ? total : received,
+      download_speed: speed,
+      eta_seconds: eta,
+    });
   }
 
   const buffer = Buffer.concat(chunks);
@@ -110,41 +240,31 @@ async function downloadDirect(item: DownloadItem) {
     progress: 100,
     download_path: destPath.replace(/\\/g, '/'),
     size_bytes: buffer.length,
+    download_speed: null,
+    eta_seconds: null,
   });
 }
 
 async function downloadViaQbittorrent(item: DownloadItem) {
-  const settings = getSettings();
-  if (!settings.qbittorrent_url) {
-    throw new Error('qBittorrent no configurado. Añade la URL en Configuración.');
-  }
+  const session = await qbLogin();
+  if (!session) throw new Error('qBittorrent no configurado o no responde. Revisa Configuración.');
 
-  const loginRes = await fetch(`${settings.qbittorrent_url}/api/v2/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      username: settings.qbittorrent_user,
-      password: settings.qbittorrent_pass,
-    }),
-  });
-
-  if (!loginRes.ok) throw new Error('No se pudo conectar a qBittorrent');
-
-  const cookies = loginRes.headers.get('set-cookie') || '';
   const url = item.magnet_url || item.torrent_url!;
+  const hash = await qbAddTorrent(session, url);
 
-  const addRes = await fetch(`${settings.qbittorrent_url}/api/v2/torrents/add`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-      Cookie: cookies,
-    },
-    body: new URLSearchParams({ urls: url }),
+  updateDownload(item.id, {
+    status: 'downloading',
+    progress: 0,
+    qb_hash: hash,
+    download_speed: null,
+    eta_seconds: null,
+    error_message: null,
   });
 
-  if (!addRes.ok) throw new Error('Error al añadir torrent a qBittorrent');
-
-  updateDownload(item.id, { status: 'downloading', progress: 0 });
+  if (hash) {
+    const t = await qbGetTorrent(session, hash);
+    if (t) applyTorrentState(item, t);
+  }
 }
 
 function moveFile(src: string, dest: string) {
@@ -194,6 +314,8 @@ export async function finalizeDownload(
   updateDownload(item.id, {
     status: 'completed',
     download_path: destPath.replace(/\\/g, '/'),
+    download_speed: null,
+    eta_seconds: null,
   });
 
   return destPath.replace(/\\/g, '/');
@@ -202,5 +324,5 @@ export async function finalizeDownload(
 export function startDownloadProcessor() {
   setInterval(() => {
     processQueue().catch(console.error);
-  }, 10000);
+  }, 3000);
 }

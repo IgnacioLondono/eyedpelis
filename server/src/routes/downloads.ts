@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import {
-  addToQueue, getAllDownloads, deleteDownload, updateDownload, finalizeDownload,
+  addToQueue, getAllDownloads, deleteDownload, updateDownload, finalizeDownload, syncActiveDownloads,
 } from '../services/downloadManager.js';
 import { scanLibrary } from '../services/scanner.js';
 import { getSearchCapabilities, pickBestTorrent, searchTorrents } from '../services/torrentSearch.js';
@@ -30,8 +30,13 @@ router.get('/search', async (req, res) => {
   }
 });
 
-router.get('/', (_req, res) => {
-  res.json(getAllDownloads());
+router.get('/', async (_req, res) => {
+  try {
+    await syncActiveDownloads();
+    res.json(getAllDownloads());
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Error al listar descargas' });
+  }
 });
 
 router.post('/', async (req, res) => {
