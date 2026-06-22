@@ -124,6 +124,27 @@ export function normalizeTitleKey(title: string): string {
   return title.toLowerCase().replace(/[^a-z0-9áéíóúñ]/gi, '').trim();
 }
 
+/** Clave canónica para agrupar la misma serie con títulos ligeramente distintos */
+export function canonicalSeriesKey(title: string): string {
+  let t = title.trim();
+  t = t.replace(/\s*\((19|20)\d{2}\)\s*$/, '');
+  t = t.split(/[:：|]/)[0]?.trim() || t;
+  t = t.replace(/\s*-\s*.+$/, '').trim();
+  return normalizeTitleKey(t);
+}
+
+export function seriesTitlesMatch(a: string, b: string): boolean {
+  const ka = canonicalSeriesKey(a);
+  const kb = canonicalSeriesKey(b);
+  if (!ka || !kb) return false;
+  if (ka === kb) return true;
+  const minLen = 8;
+  if (ka.length >= minLen && kb.length >= minLen) {
+    return ka.startsWith(kb) || kb.startsWith(ka);
+  }
+  return false;
+}
+
 /** Usa la carpeta de serie (primer nivel bajo Series/) para el título */
 export function parseWithFolderContext(
   fileName: string,

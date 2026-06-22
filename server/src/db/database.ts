@@ -103,6 +103,12 @@ export function deleteMediaByPath(filePath: string) {
   persist();
 }
 
+export function deleteMediaById(id: number) {
+  const db = getDb();
+  db.media = db.media.filter(m => m.id !== id);
+  persist();
+}
+
 export function findMedia(query: (m: MediaItem) => boolean): MediaItem[] {
   return getDb().media.filter(query);
 }

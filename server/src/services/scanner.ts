@@ -1,13 +1,18 @@
 import fs from 'fs';
 import path from 'path';
 import {
-  persist, insertMedia, updateMedia, deleteMediaByPath,
+  persist, insertMedia, updateMedia, deleteMediaByPath, deleteMediaById,
   findMedia, getMediaByPath, normalizeMediaPath,
 } from '../db/database.js';
 import { getMoviesPath, getSeriesPath, isMediaReadOnly } from '../config.js';
 import { enrichFromTmdb, tmdbMetadataWithGenres } from './tmdb.js';
 import { findAllSubtitles } from './subtitles.js';
-import { parseWithFolderContext, normalizeTitleKey, seriesFolderFromPath } from './filenameParser.js';
+import {
+  parseWithFolderContext,
+  canonicalSeriesKey,
+  seriesTitlesMatch,
+  seriesFolderFromPath,
+} from './filenameParser.js';
 import {
   getEnrichPromise, getScanStatus, isScanRunning, setEnrichPromise, setScanProgress,
 } from './scanState.js';
@@ -69,12 +74,73 @@ function walkDir(baseDir: string, currentDir: string, type: MediaType, results: 
   return results;
 }
 
-function findSeriesParent(title: string): MediaItem | undefined {
-  const key = normalizeTitleKey(title);
-  return findMedia(m =>
-    m.type === 'series' && !m.file_path &&
-    normalizeTitleKey(m.title) === key,
-  )[0];
+function findSeriesParent(title: string, tmdbId?: number | null): MediaItem | undefined {
+  const parents = findMedia(m => m.type === 'series' && !m.file_path);
+
+  if (tmdbId) {
+    const byTmdb = parents.find(m => m.tmdb_id === tmdbId);
+    if (byTmdb) return byTmdb;
+  }
+
+  const key = canonicalSeriesKey(title);
+  const exact = parents.find(m => canonicalSeriesKey(m.title) === key);
+  if (exact) return exact;
+
+  return parents.find(m => seriesTitlesMatch(m.title, title));
+}
+
+function episodeCountForSeries(seriesId: number): number {
+  return findMedia(m => m.series_id === seriesId && !!m.file_path).length;
+}
+
+function pickBestSeriesParent(candidates: MediaItem[]): MediaItem {
+  return [...candidates].sort((a, b) => {
+    const epDiff = episodeCountForSeries(b.id) - episodeCountForSeries(a.id);
+    if (epDiff !== 0) return epDiff;
+    if (b.poster_path && !a.poster_path) return 1;
+    if (a.poster_path && !b.poster_path) return -1;
+    if (b.tmdb_id && !a.tmdb_id) return 1;
+    if (a.tmdb_id && !b.tmdb_id) return -1;
+    return a.id - b.id;
+  })[0];
+}
+
+function mergeDuplicateSeriesParents(): number {
+  const parents = findMedia(m => m.type === 'series' && !m.file_path);
+  const used = new Set<number>();
+  let merged = 0;
+
+  for (let i = 0; i < parents.length; i++) {
+    const seed = parents[i];
+    if (used.has(seed.id)) continue;
+
+    const group = parents.filter(p =>
+      !used.has(p.id) && (
+        (seed.tmdb_id && p.tmdb_id === seed.tmdb_id) ||
+        seriesTitlesMatch(p.title, seed.title)
+      ),
+    );
+
+    if (group.length <= 1) {
+      used.add(seed.id);
+      continue;
+    }
+
+    const winner = pickBestSeriesParent(group);
+    for (const loser of group) {
+      if (loser.id === winner.id) continue;
+      for (const ep of findMedia(e => e.series_id === loser.id)) {
+        updateMedia(ep.id, { series_id: winner.id });
+      }
+      deleteMediaById(loser.id);
+      used.add(loser.id);
+      merged++;
+    }
+    used.add(winner.id);
+  }
+
+  if (merged > 0) persist();
+  return merged;
 }
 
 async function getOrCreateSeriesParent(
@@ -83,7 +149,7 @@ async function getOrCreateSeriesParent(
   enrich: boolean,
   cache: Map<string, number>,
 ): Promise<number> {
-  const cacheKey = `${normalizeTitleKey(title)}|${year ?? ''}`;
+  const cacheKey = `${canonicalSeriesKey(title)}|${year ?? ''}`;
   if (cache.has(cacheKey)) return cache.get(cacheKey)!;
 
   const existing = findSeriesParent(title);
@@ -104,6 +170,12 @@ async function getOrCreateSeriesParent(
   const seriesMeta = enrich
     ? await applyTmdbToItem(stubFile, await fetchTmdbForFile(stubFile))
     : basicFileMeta(stubFile);
+
+  const existingAfterMeta = findSeriesParent(seriesMeta.title ?? title, seriesMeta.tmdb_id);
+  if (existingAfterMeta) {
+    cache.set(cacheKey, existingAfterMeta.id);
+    return existingAfterMeta.id;
+  }
 
   const created = insertMedia({
     tmdb_id: seriesMeta.tmdb_id ?? null,
@@ -337,6 +409,7 @@ export async function scanLibrary(options?: ScanOptions): Promise<ScanResult> {
 
   if (scope === 'all' || scope === 'series') {
     await repairOrphanEpisodes(seriesPath, enrich, seriesCache);
+    mergeDuplicateSeriesParents();
   }
 
   persist();
