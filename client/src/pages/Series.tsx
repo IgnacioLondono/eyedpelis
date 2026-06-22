@@ -1,5 +1,5 @@
-import MediaCard from '../components/MediaCard';
 import LibraryToolbar, { useLibraryPage } from '../components/LibraryToolbar';
+import LibraryMediaGrid from '../components/LibraryMediaGrid';
 
 export default function Series() {
   const { filters, setFilters, items, filterOptions, loading, error } = useLibraryPage('series');
@@ -23,15 +23,19 @@ export default function Series() {
           ))}
         </div>
       ) : error ? (
-        <div className="text-center py-20 text-red-400">{error}</div>
+        <div className="text-center py-20">
+          <p className="text-red-400 mb-4">{error}</p>
+          <button type="button" onClick={() => setFilters(f => ({ ...f }))} className="btn-secondary">
+            Reintentar
+          </button>
+        </div>
       ) : items.length === 0 ? (
         <p className="text-gray-400 text-center py-20">No hay series con esos filtros.</p>
       ) : (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-          {items.map((s, i) => (
-            <MediaCard key={s.id} item={s} libraryId={s.id} index={i} />
-          ))}
-        </div>
+        <LibraryMediaGrid
+          items={items}
+          alphabetIndex={filters.sort === 'title' && !filters.search}
+        />
       )}
     </div>
   );

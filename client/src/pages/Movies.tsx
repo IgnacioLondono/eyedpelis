@@ -1,5 +1,5 @@
-import MediaCard from '../components/MediaCard';
 import LibraryToolbar, { useLibraryPage } from '../components/LibraryToolbar';
+import LibraryMediaGrid from '../components/LibraryMediaGrid';
 
 export default function Movies() {
   const { filters, setFilters, items, filterOptions, loading, error } = useLibraryPage('movie');
@@ -25,7 +25,7 @@ export default function Movies() {
       ) : error ? (
         <div className="text-center py-20">
           <p className="text-red-400 mb-4">{error}</p>
-          <button type="button" onClick={() => setFilters(f => ({ ...f, sort: 'recent' }))} className="btn-secondary">
+          <button type="button" onClick={() => setFilters(f => ({ ...f }))} className="btn-secondary">
             Reintentar
           </button>
         </div>
@@ -34,11 +34,11 @@ export default function Movies() {
           <p>No hay películas con esos filtros.</p>
         </div>
       ) : (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-          {items.map((m, i) => (
-            <MediaCard key={m.id} item={m} libraryId={m.id} showPlay index={i} />
-          ))}
-        </div>
+        <LibraryMediaGrid
+          items={items}
+          showPlay
+          alphabetIndex={filters.sort === 'title' && !filters.search}
+        />
       )}
     </div>
   );

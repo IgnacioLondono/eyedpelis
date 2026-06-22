@@ -169,6 +169,7 @@ export default function VideoPlayer({
   const activeSubRef = useRef(-1);
   const streamGenRef = useRef(0);
   const audioAnchorRef = useRef(0);
+  const audioReloadingRef = useRef(false);
 
   const [playback, setPlayback] = useState<Playback>(() =>
     initialPlayback(src, compatAudioSrc, needsAudioCompat, preferredAudioIndex),
@@ -185,7 +186,6 @@ export default function VideoPlayer({
   const [fullscreen, setFullscreen] = useState(false);
   const [showControls, setShowControls] = useState(true);
   const [buffering, setBuffering] = useState(true);
-  const [syncingAudio, setSyncingAudio] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showLangMenu, setShowLangMenu] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -221,7 +221,7 @@ export default function VideoPlayer({
     if (!compatAudioSrc) return;
     streamGenRef.current += 1;
     audioAnchorRef.current = atSec;
-    setSyncingAudio(true);
+    audioReloadingRef.current = true;
     const audioSrc = buildStreamUrl(compatAudioSrc, audioIndex, atSec, streamGenRef.current);
     setPlayback(p => {
       const next = { ...p, engine: 'split' as const, videoSrc: src, audioSrc, audioIndex, offset: 0 };
@@ -254,7 +254,10 @@ export default function VideoPlayer({
     if (!v) return;
 
     if (isTranscode && compatSrc) {
+      v.pause();
+      setBuffering(true);
       setCurrentTime(t);
+      timeRef.current = t;
       if (audioSeekTimer.current) clearTimeout(audioSeekTimer.current);
       audioSeekTimer.current = setTimeout(() => goTranscode(playback.audioIndex, t), 300);
       return;
@@ -265,8 +268,9 @@ export default function VideoPlayer({
     setCurrentTime(t);
 
     if (isSplit && compatAudioSrc) {
+      audioAnchorRef.current = t;
       if (audioSeekTimer.current) clearTimeout(audioSeekTimer.current);
-      audioSeekTimer.current = setTimeout(() => reloadAudio(t, playback.audioIndex), 200);
+      audioSeekTimer.current = setTimeout(() => reloadAudio(t, playback.audioIndex), 250);
     }
   }, [duration, isTranscode, isSplit, compatSrc, compatAudioSrc, playback.audioIndex, goTranscode, reloadAudio]);
 
@@ -338,14 +342,15 @@ export default function VideoPlayer({
     const v = videoRef.current;
     const a = audioRef.current;
     if (!v) return;
+    const split = playbackRef.current?.engine === 'split';
     if (v.paused) {
       tryPlay(v);
-      if (a && isSplit) tryPlay(a);
+      if (a && split) tryPlay(a);
     } else {
       v.pause();
       a?.pause();
     }
-  }, [isSplit]);
+  }, []);
 
   const toggleMute = useCallback(() => {
     setMuted(m => !m);
@@ -439,7 +444,7 @@ export default function VideoPlayer({
 
   useEffect(() => {
     if (!isSplit) return;
-    const id = window.setInterval(syncAudioElement, 1500);
+    const id = window.setInterval(syncAudioElement, 800);
     return () => clearInterval(id);
   }, [isSplit, syncAudioElement]);
 
@@ -488,9 +493,9 @@ export default function VideoPlayer({
         playsInline
         autoPlay
         muted={isSplit || isTranscode || muted}
-        onPlay={() => { setPlaying(true); setBuffering(false); if (isSplit) syncAudioElement(); }}
+        onPlay={() => { setPlaying(true); if (!audioReloadingRef.current) setBuffering(false); syncAudioElement(); }}
         onPause={() => { setPlaying(false); setShowControls(true); audioRef.current?.pause(); }}
-        onWaiting={() => { if (!syncingAudio) setBuffering(true); }}
+        onWaiting={() => { if (!audioReloadingRef.current) setBuffering(true); }}
         onCanPlay={() => { setBuffering(false); tryPlay(videoRef.current!); }}
         onTimeUpdate={() => {
           const v = videoRef.current;
@@ -531,13 +536,16 @@ export default function VideoPlayer({
           className="hidden"
           autoPlay
           onCanPlay={() => {
-            setSyncingAudio(false);
+            audioReloadingRef.current = false;
             syncAudioElement();
             const v = videoRef.current;
             if (v && !v.paused) tryPlay(audioRef.current!);
           }}
-          onWaiting={() => setSyncingAudio(true)}
-          onError={() => setSyncingAudio(false)}
+          onError={() => {
+            audioReloadingRef.current = false;
+            const pb = playbackRef.current;
+            if (pb && compatSrc) goTranscode(pb.audioIndex, timeRef.current);
+          }}
         />
       )}
 
@@ -555,13 +563,7 @@ export default function VideoPlayer({
         <div className="absolute bottom-28 left-1/2 -translate-x-1/2 z-[25] text-xs text-amber-400 bg-black/70 px-3 py-1 rounded-lg">{subError}</div>
       )}
 
-      {syncingAudio && !error && (
-        <div className="absolute top-20 left-1/2 -translate-x-1/2 z-30 px-3 py-1.5 bg-black/70 backdrop-blur-sm rounded-lg text-white/70 text-xs">
-          Sincronizando audio…
-        </div>
-      )}
-
-      {buffering && !syncingAudio && !error && (
+      {buffering && !error && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           <div className="bg-black/40 backdrop-blur-sm rounded-full p-4">
             <Loader2 size={44} className="text-white animate-spin" />
