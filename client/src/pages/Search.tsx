@@ -3,10 +3,12 @@ import { Search as SearchIcon, Download, Film, Tv, Link2, Info, RefreshCw, Users
 import { api, posterUrl, formatBytes } from '../api';
 import Modal from '../components/Modal';
 import { errorMessage, useNotice } from '../context/NoticeContext';
+import { usePageShell } from '../hooks/usePageShell';
 import type { SearchResult, TorrentResult } from '../types';
 
 export default function Search() {
   const { showError, showSuccess } = useNotice();
+  const { shell, title, isAndroidTv } = usePageShell();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
@@ -115,8 +117,8 @@ export default function Search() {
   const filtered = filter === 'all' ? results : results.filter(r => r.type === filter);
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
-      <h1 className="text-3xl font-bold mb-6">Buscar online</h1>
+    <div className={`${shell} max-w-6xl mx-auto`}>
+      <h1 className={title}>Buscar online</h1>
 
       <form onSubmit={handleSearch} className="flex gap-3 mb-6">
         <div className="relative flex-1">
@@ -126,7 +128,9 @@ export default function Search() {
             placeholder="Buscar películas y series en TMDB..."
             value={query}
             onChange={e => setQuery(e.target.value)}
-            className="w-full bg-surface-card border border-surface-border rounded-xl pl-12 pr-4 py-3.5 text-base focus:outline-none focus:border-accent"
+            className={`w-full bg-surface-card border border-surface-border rounded-xl pl-12 pr-4 text-base focus:outline-none focus:border-accent ${
+              isAndroidTv ? 'py-4 text-lg' : 'py-3.5'
+            }`}
           />
         </div>
         <button type="submit" className="btn-primary px-8" disabled={loading}>

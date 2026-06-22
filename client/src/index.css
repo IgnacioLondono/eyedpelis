@@ -82,8 +82,20 @@ html.tv-mode {
   font-size: 18px;
 }
 
+html.tv-mode body {
+  background-image: radial-gradient(ellipse at top left, rgba(147, 51, 234, 0.12) 0%, transparent 45%);
+}
+
 html.tv-mode .tv-main {
   font-size: 1rem;
+}
+
+html.tv-mode .tv-layout {
+  overflow: hidden;
+}
+
+html.tv-mode .tv-row-scroll {
+  scroll-padding-inline: 2.5rem;
 }
 
 html.tv-mode .card-hover {
@@ -93,6 +105,38 @@ html.tv-mode .card-hover {
 html.tv-mode .tv-subtitle {
   font-size: clamp(1.35rem, 2.5vw, 2rem) !important;
   line-height: 1.5;
+}
+
+/* Modo Android móvil */
+html.android-mobile {
+  font-size: 16px;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html.android-mobile body {
+  overscroll-behavior-y: none;
+}
+
+html.android-mobile .android-mobile-main {
+  min-height: 100dvh;
+}
+
+html.android-mobile .safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+html.android-mobile .safe-top {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+html.android-app {
+  user-select: none;
+}
+
+html.android-app input,
+html.android-app textarea,
+html.android-app [contenteditable] {
+  user-select: text;
 }
 
 /* Subtítulos en el reproductor */

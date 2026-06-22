@@ -1,12 +1,14 @@
 import LibraryToolbar, { useLibraryPage } from '../components/LibraryToolbar';
 import LibraryMediaGrid from '../components/LibraryMediaGrid';
+import { usePageShell } from '../hooks/usePageShell';
 
 export default function Movies() {
   const { filters, setFilters, items, filterOptions, loading, error, viewMode, setViewMode } = useLibraryPage('movie');
+  const { shell, title } = usePageShell();
 
   return (
-    <div className="p-6">
-      <h1 className="text-3xl font-bold mb-6">Películas</h1>
+    <div className={shell}>
+      <h1 className={title}>Películas</h1>
 
       <LibraryToolbar
         filters={filters}

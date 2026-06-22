@@ -2,6 +2,9 @@ import { useMemo } from 'react';
 import MediaCard from './MediaCard';
 import MediaListRow from './MediaListRow';
 import AlphabetIndex from './AlphabetIndex';
+import MobilePosterCard from './android/MobilePosterCard';
+import TvPosterCard from './android/TvPosterCard';
+import { usePlatform } from '../context/PlatformContext';
 import type { MediaItem } from '../types';
 import type { LibraryViewMode } from './LibraryToolbar';
 import { groupByLetter } from '../utils/alphabet';
@@ -68,10 +71,31 @@ function AlphabetSections({
 }
 
 export default function LibraryMediaGrid({ items, showPlay, viewMode }: Props) {
+  const { isAndroidMobile, isAndroidTv } = usePlatform();
   const groups = useMemo(
     () => (viewMode === 'alphabet' ? groupByLetter(items) : null),
     [items, viewMode],
   );
+
+  if (isAndroidMobile && viewMode === 'grid') {
+    return (
+      <div className="grid grid-cols-3 gap-3 sm:grid-cols-4">
+        {items.map(m => (
+          <MobilePosterCard key={m.id} item={m} libraryId={m.id} />
+        ))}
+      </div>
+    );
+  }
+
+  if (isAndroidTv && viewMode === 'grid') {
+    return (
+      <div className="grid grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-5">
+        {items.map(m => (
+          <TvPosterCard key={m.id} item={m} libraryId={m.id} />
+        ))}
+      </div>
+    );
+  }
 
   if (viewMode === 'list') {
     return <ListView items={items} showPlay={showPlay} />;

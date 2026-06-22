@@ -1,9 +1,12 @@
 import { useState } from 'react';
 import { LogIn, Eye } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { usePlatform } from '../context/PlatformContext';
+import { tvFocusClass } from '../components/android/focus';
 
 export default function Login() {
   const { login } = useAuth();
+  const { isAndroidTv, isAndroidMobile } = usePlatform();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -23,17 +26,21 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-surface p-4 overflow-hidden">
+    <div className={`min-h-screen flex items-center justify-center bg-surface overflow-hidden ${
+      isAndroidMobile ? 'p-6 safe-top safe-bottom' : isAndroidTv ? 'p-12' : 'p-4'
+    }`}>
       <div className="absolute inset-0 bg-gradient-to-br from-purple-900/20 via-transparent to-transparent pointer-events-none" />
       <div className="absolute top-1/4 left-1/4 w-64 h-64 bg-purple-600/10 rounded-full blur-3xl animate-pulse-glow pointer-events-none" />
       <div className="absolute bottom-1/4 right-1/4 w-48 h-48 bg-violet-600/10 rounded-full blur-3xl animate-float pointer-events-none" />
 
-      <div className="w-full max-w-md relative animate-scale-in">
+      <div className={`w-full relative animate-scale-in ${isAndroidTv ? 'max-w-xl' : 'max-w-md'}`}>
         <div className="text-center mb-8 animate-fade-in-down">
-          <div className="inline-flex items-center justify-center w-16 h-16 bg-accent/15 rounded-2xl mb-4 shadow-purple border border-purple-500/20 animate-pulse-glow">
-            <Eye size={32} className="text-accent animate-float" />
+          <div className={`inline-flex items-center justify-center bg-accent/15 rounded-2xl mb-4 shadow-purple border border-purple-500/20 ${
+            isAndroidTv ? 'w-20 h-20' : 'w-16 h-16'
+          }`}>
+            <Eye size={isAndroidTv ? 40 : 32} className="text-accent" />
           </div>
-          <h1 className="text-3xl font-extrabold brand-text">Eyedpelis</h1>
+          <h1 className={`font-extrabold brand-text ${isAndroidTv ? 'text-5xl' : 'text-3xl'}`}>Eyedpelis</h1>
           <p className="text-gray-400 mt-2">Inicia sesión para acceder a tu biblioteca</p>
         </div>
 
@@ -54,7 +61,9 @@ export default function Login() {
               type="text"
               value={username}
               onChange={e => setUsername(e.target.value)}
-              className="w-full bg-surface border border-surface-border rounded-lg px-4 py-3 focus:outline-none focus:border-accent input-field"
+              className={`w-full bg-surface border border-surface-border rounded-lg px-4 focus:outline-none focus:border-accent input-field ${
+                isAndroidTv ? 'py-4 text-lg' : 'py-3'
+              } ${tvFocusClass}`}
               autoFocus
               required
             />
@@ -66,7 +75,9 @@ export default function Login() {
               type="password"
               value={password}
               onChange={e => setPassword(e.target.value)}
-              className="w-full bg-surface border border-surface-border rounded-lg px-4 py-3 focus:outline-none focus:border-accent input-field"
+              className={`w-full bg-surface border border-surface-border rounded-lg px-4 focus:outline-none focus:border-accent input-field ${
+                isAndroidTv ? 'py-4 text-lg' : 'py-3'
+              } ${tvFocusClass}`}
               required
             />
           </div>
@@ -74,7 +85,7 @@ export default function Login() {
           <button
             type="submit"
             disabled={loading}
-            className="btn-primary w-full flex items-center justify-center gap-2 py-3 animate-fade-in-up"
+            className={`btn-primary w-full flex items-center justify-center gap-2 ${isAndroidTv ? 'py-4 text-lg min-h-[56px]' : 'py-3'} ${tvFocusClass}`}
             style={{ animationDelay: '450ms' }}
           >
             <LogIn size={18} className={loading ? 'animate-spin' : ''} />

@@ -3,10 +3,12 @@ import { Save, RefreshCw, FolderOpen, Key, Server, Shield, Link2, Lock, CheckCir
 import { api } from '../api';
 import { errorMessage, useNotice } from '../context/NoticeContext';
 import ScanProgressModal, { useScanProgress } from '../components/ScanProgressModal';
+import { usePageShell } from '../hooks/usePageShell';
 import type { Settings } from '../types';
 
 export default function SettingsPage() {
   const { showError } = useNotice();
+  const { shell, title } = usePageShell();
   const scanProgress = useScanProgress(() => api.getSettingsScanStatus());
   const [settings, setSettings] = useState<Settings>({
     media_path: '',
@@ -178,8 +180,8 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="p-6 max-w-2xl mx-auto">
-      <h1 className="text-3xl font-bold mb-8">Configuración</h1>
+    <div className={`${shell} max-w-2xl mx-auto`}>
+      <h1 className={title}>Configuración</h1>
 
       {message && (
         <div className="bg-green-500/15 border border-green-500/30 text-green-400 rounded-lg px-4 py-3 mb-6 text-sm">

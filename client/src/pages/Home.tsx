@@ -1,40 +1,24 @@
-import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Film, Tv, Search, Sparkles, RefreshCw, ChevronRight } from 'lucide-react';
-import { api } from '../api';
-import type { MediaItem, SearchResult } from '../types';
+import { usePlatform } from '../context/PlatformContext';
+import { useHomeData } from '../hooks/useHomeData';
+import AndroidMobileHome from './android/AndroidMobileHome';
+import AndroidTvHome from './android/AndroidTvHome';
 import MediaCard from '../components/MediaCard';
 import HeroCarousel from '../components/HeroCarousel';
 import Section from '../components/Section';
 
 export default function Home() {
-  const [movies, setMovies] = useState<MediaItem[]>([]);
-  const [series, setSeries] = useState<MediaItem[]>([]);
-  const [popular, setPopular] = useState<SearchResult[]>([]);
-  const [heroItems, setHeroItems] = useState<MediaItem[]>([]);
-  const [loaded, setLoaded] = useState(false);
+  const { isAndroidMobile, isAndroidTv } = usePlatform();
 
-  useEffect(() => {
-    Promise.all([
-      api.getMovies({ sort: 'recent' }),
-      api.getSeries({ sort: 'rating' }),
-      api.getPopular('movie'),
-    ]).then(([m, ser, pop]) => {
-      setMovies(m.slice(0, 12));
-      setSeries(ser.slice(0, 12));
-      setPopular(pop.slice(0, 12));
+  if (isAndroidTv) return <AndroidTvHome />;
+  if (isAndroidMobile) return <AndroidMobileHome />;
 
-      const featured = [...m, ...ser]
-        .filter(item => item.backdrop_path)
-        .sort((a, b) => (b.vote_average ?? 0) - (a.vote_average ?? 0))
-        .slice(0, 8);
-      setHeroItems(featured);
+  return <WebHome />;
+}
 
-      setLoaded(true);
-    }).catch(console.error);
-  }, []);
-
-  const hasLibrary = movies.length > 0 || series.length > 0;
+function WebHome() {
+  const { movies, series, popular, heroItems, loaded, hasLibrary } = useHomeData();
 
   return (
     <div className="pb-16">
@@ -83,7 +67,7 @@ export default function Home() {
           }
         >
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-            {movies.map((m, i) => (
+            {movies.slice(0, 12).map((m, i) => (
               <MediaCard key={m.id} item={m} libraryId={m.id} showPlay index={i} />
             ))}
           </div>
@@ -101,7 +85,7 @@ export default function Home() {
           }
         >
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-            {series.map((s, i) => (
+            {series.slice(0, 12).map((s, i) => (
               <MediaCard key={s.id} item={s} libraryId={s.id} index={i} />
             ))}
           </div>
@@ -119,7 +103,7 @@ export default function Home() {
           }
         >
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-            {popular.map((p, i) => (
+            {popular.slice(0, 12).map((p, i) => (
               <MediaCard key={p.id} item={p} index={i} />
             ))}
           </div>

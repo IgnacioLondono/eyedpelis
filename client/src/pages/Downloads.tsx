@@ -6,6 +6,7 @@ import {
 import { api, posterUrl, formatBytes, formatSpeed, formatEta } from '../api';
 import Modal from '../components/Modal';
 import { useNotice } from '../context/NoticeContext';
+import { usePageShell } from '../hooks/usePageShell';
 import type { DownloadItem } from '../types';
 
 const statusConfig: Record<string, { icon: typeof Clock; color: string; label: string; bar?: string }> = {
@@ -22,6 +23,7 @@ function isActive(d: DownloadItem) {
 }
 
 export default function Downloads() {
+  const { shell, heading } = usePageShell();
   const { showSuccess } = useNotice();
   const [downloads, setDownloads] = useState<DownloadItem[]>([]);
   const [folderModal, setFolderModal] = useState<DownloadItem | null>(null);
@@ -178,10 +180,10 @@ export default function Downloads() {
   }
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
+    <div className={`${shell} max-w-4xl mx-auto`}>
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-3xl font-bold">Descargas</h1>
+          <h1 className={heading}>Descargas</h1>
           <p className="text-sm text-gray-500 mt-1">
             {activeCount > 0 ? `${activeCount} activa(s) · actualización cada 3s` : 'Sin descargas activas'}
           </p>

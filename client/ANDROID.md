@@ -55,8 +55,8 @@ https://eyedmovies.eyedcomun.me/?tv=1
 | Característica | Detalle |
 |----------------|---------|
 | Servidor remoto | `server.url` en `capacitor.config.ts` — no empaqueta el backend |
-| Móvil | Launcher normal, navegación táctil |
-| Android TV | Banner, leanback launcher, menú simplificado, foco D-pad |
+| Móvil | Barra inferior, filas horizontales, hero compacto, safe areas |
+| Android TV | Sidebar, filas horizontales con foco D-pad, hero grande |
 | Reproductor | Play/Pause del mando, seek ±10s, pantalla completa en TV |
 | Atrás | Botón del sistema → historial WebView o salir |
 
@@ -74,8 +74,10 @@ https://eyedmovies.eyedcomun.me/?tv=1
 - `capacitor.config.ts` — URL remota y appId
 - `android/app/src/main/AndroidManifest.xml` — permisos, TV, launcher
 - `android/.../MainActivity.java` — WebView, vídeo, botón atrás
-- `src/utils/device.ts` — detección modo TV
-- `src/components/Layout.tsx` — menú adaptado a TV
+- `src/utils/device.ts` — detección móvil / TV / Capacitor
+- `src/layouts/AppLayout.tsx` — layout según plataforma
+- `src/pages/android/` — inicio optimizado móvil y TV
+- `src/components/android/` — componentes nativos (nav, filas, posters)
 
 ## Notas
 

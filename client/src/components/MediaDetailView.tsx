@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { api, backdropUrl, posterUrl, stillUrl, formatDate, formatBytes } from '../api';
 import { languageLabel, formatRuntime } from '../utils/tmdbHelpers';
+import { usePlatform } from '../context/PlatformContext';
 import type { MediaItem, SubtitleTrack } from '../types';
 import type { TmdbDetails, TmdbEpisodeInfo } from '../utils/tmdbHelpers';
 
@@ -17,6 +18,7 @@ interface Props {
 }
 
 export default function MediaDetailView({ media, tmdb, libraryId, type, episodes = [] }: Props) {
+  const { isAndroidMobile, isAndroidTv } = usePlatform();
   const title = tmdb?.title || tmdb?.name || media?.title || 'Sin título';
   const originalTitle = tmdb?.original_title || tmdb?.original_name || media?.original_title;
   const overview = tmdb?.overview || media?.overview;
@@ -98,7 +100,9 @@ export default function MediaDetailView({ media, tmdb, libraryId, type, episodes
   return (
     <div className="pb-12">
       {/* Banner de fondo */}
-      <div className="relative h-[45vh] md:h-[55vh] overflow-hidden">
+      <div className={`relative overflow-hidden ${
+        isAndroidMobile ? 'h-[38vh]' : isAndroidTv ? 'h-[50vh]' : 'h-[45vh] md:h-[55vh]'
+      }`}>
         {backdrop ? (
           <img
             src={backdropUrl(backdrop)}
@@ -114,7 +118,9 @@ export default function MediaDetailView({ media, tmdb, libraryId, type, episodes
       </div>
 
       {/* Contenido */}
-      <div className="relative -mt-36 md:-mt-40 px-6 md:px-12 max-w-6xl mx-auto">
+      <div className={`relative max-w-6xl mx-auto ${
+        isAndroidMobile ? '-mt-28 px-4' : isAndroidTv ? '-mt-36 px-10' : '-mt-36 md:-mt-40 px-6 md:px-12'
+      }`}>
         <div className="flex flex-col md:flex-row gap-8 animate-fade-in-up">
           {/* Poster */}
           <div className="flex-shrink-0 mx-auto md:mx-0">

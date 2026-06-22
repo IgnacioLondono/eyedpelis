@@ -1,12 +1,14 @@
 import LibraryToolbar, { useLibraryPage } from '../components/LibraryToolbar';
 import LibraryMediaGrid from '../components/LibraryMediaGrid';
+import { usePageShell } from '../hooks/usePageShell';
 
 export default function Series() {
   const { filters, setFilters, items, filterOptions, loading, error, viewMode, setViewMode } = useLibraryPage('series');
+  const { shell, title } = usePageShell();
 
   return (
-    <div className="p-6">
-      <h1 className="text-3xl font-bold mb-6">Series</h1>
+    <div className={shell}>
+      <h1 className={title}>Series</h1>
 
       <LibraryToolbar
         filters={filters}

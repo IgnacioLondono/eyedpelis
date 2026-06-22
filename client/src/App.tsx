@@ -2,7 +2,7 @@ import { Routes, Route } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import { NoticeProvider } from './context/NoticeContext';
 import ProtectedRoute from './components/ProtectedRoute';
-import Layout from './components/Layout';
+import Layout from './layouts/AppLayout';
 import Home from './pages/Home';
 import Movies from './pages/Movies';
 import Series from './pages/Series';
@@ -12,6 +12,7 @@ import Settings from './pages/Settings';
 import FileManager from './pages/FileManager';
 import Detail from './pages/Detail';
 import MediaDetail from './pages/MediaDetail';
+import More from './pages/More';
 import Player from './pages/Player';
 
 export default function App() {
@@ -28,6 +29,7 @@ export default function App() {
             <Route path="/downloads" element={<Downloads />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/files" element={<FileManager />} />
+            <Route path="/more" element={<More />} />
             <Route path="/media/:id" element={<MediaDetail />} />
             <Route path="/detail/:type/:id" element={<Detail />} />
           </Route>
