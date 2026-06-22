@@ -20,6 +20,7 @@ export default function Search() {
   const [directUrl, setDirectUrl] = useState('');
   const [showManual, setShowManual] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [searchCaps, setSearchCaps] = useState<Record<string, boolean> | null>(null);
 
   async function handleSearch(e: React.FormEvent) {
     e.preventDefault();
@@ -48,6 +49,7 @@ export default function Search() {
         year,
         tmdb_id: item.id,
       });
+      setSearchCaps(data.capabilities);
       setTorrents(data.results);
       if (data.results.length > 0) setSelectedTorrent(data.results[0]);
     } catch (err) {
@@ -207,8 +209,19 @@ export default function Search() {
             Buscando en indexadores...
           </div>
         ) : torrents.length === 0 ? (
-          <div className="py-6 px-4 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-200 text-sm mb-4">
-            No se encontraron torrents automáticamente. Configura Prowlarr o Jackett en Configuración, o pega un enlace manual abajo.
+          <div className="py-6 px-4 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-200 text-sm mb-4 space-y-2">
+            <p>
+              No hay torrents que coincidan con <strong className="text-amber-100">{showModal?.title}</strong>.
+            </p>
+            {showModal?.type === 'series' && !searchCaps?.prowlarr && !searchCaps?.jackett ? (
+              <p className="text-amber-200/80 text-xs leading-relaxed">
+                EZTV solo cubre series occidentales. Para anime como Bleach necesitas <strong>Prowlarr</strong> con indexadores de anime (Nyaa, etc.) en Configuración.
+              </p>
+            ) : (
+              <p className="text-amber-200/80 text-xs leading-relaxed">
+                Configura Prowlarr o Jackett, o pega un enlace magnet manual abajo.
+              </p>
+            )}
           </div>
         ) : (
           <div className="max-h-64 overflow-y-auto space-y-2 mb-4 pr-1">

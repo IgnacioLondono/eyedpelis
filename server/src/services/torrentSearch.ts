@@ -26,6 +26,10 @@ const RES_720 = /\b720p\b/i;
 const RES_4K = /\b(2160p|4k)\b/i;
 const GOOD_SOURCE = /\b(web-?dl|bluray|bdrip|remux|webrip)\b/i;
 
+const STOP_WORDS = new Set([
+  'the', 'and', 'for', 'los', 'las', 'del', 'una', 'uno', 'por', 'con', 'que',
+]);
+
 function buildMagnet(infoHash: string, title: string): string {
   const hash = infoHash.toLowerCase().replace(/^urn:btih:/i, '');
   return `magnet:?xt=urn:btih:${hash}&dn=${encodeURIComponent(title)}`;
@@ -36,6 +40,40 @@ function extractMagnet(url: string | null | undefined): string | null {
   if (url.startsWith('magnet:')) return url;
   const match = url.match(/magnet:\?[^"'\\s]+/i);
   return match ? match[0] : null;
+}
+
+function normalizeImdbForEztv(imdbId: string): string {
+  return imdbId.replace(/t/gi, '');
+}
+
+function titleKeywords(title: string): string[] {
+  return title
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .replace(/\s*\(\d{4}\)\s*$/, '')
+    .replace(/[^\w\sáéíóúñ]/gi, ' ')
+    .split(/\s+/)
+    .filter(w => w.length >= 3 && !STOP_WORDS.has(w));
+}
+
+function isRelevantTorrent(torrentTitle: string, searchTitle: string): boolean {
+  const keywords = titleKeywords(searchTitle);
+  if (!keywords.length) return true;
+
+  const hay = torrentTitle
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '');
+
+  const hits = keywords.filter(k => hay.includes(k));
+  if (keywords.length === 1) return hits.length >= 1;
+  if (keywords.length === 2) return hits.length >= 1;
+  return hits.length >= 2 || hits.length / keywords.length >= 0.5;
+}
+
+function filterRelevant(results: TorrentResult[], searchTitle: string): TorrentResult[] {
+  return results.filter(r => isRelevantTorrent(r.title, searchTitle));
 }
 
 function normalizeResult(raw: {
@@ -49,7 +87,7 @@ function normalizeResult(raw: {
   seeders?: number;
   leechers?: number;
   source: string;
-}, year?: number): TorrentResult | null {
+}, year?: number, searchTitle?: string): TorrentResult | null {
   const magnet =
     extractMagnet(raw.magnet_url) ||
     extractMagnet(raw.downloadUrl) ||
@@ -74,11 +112,11 @@ function normalizeResult(raw: {
     source: raw.source,
     score: 0,
   };
-  result.score = scoreTorrent(result, year);
+  result.score = scoreTorrent(result, year, searchTitle);
   return result;
 }
 
-function scoreTorrent(t: TorrentResult, year?: number): number {
+function scoreTorrent(t: TorrentResult, year?: number, searchTitle?: string): number {
   let score = Math.min(t.seeders, 500) * 3;
   const title = t.title.toLowerCase();
 
@@ -90,6 +128,12 @@ function scoreTorrent(t: TorrentResult, year?: number): number {
   if (BAD_QUALITY.test(title)) score -= 300;
   if (year && title.includes(String(year))) score += 40;
   if (t.seeders < 1) score -= 100;
+
+  if (searchTitle) {
+    for (const word of titleKeywords(searchTitle)) {
+      if (title.includes(word)) score += 45;
+    }
+  }
 
   return score;
 }
@@ -108,7 +152,7 @@ function dedupeResults(results: TorrentResult[]): TorrentResult[] {
   return out;
 }
 
-async function searchProwlarr(query: string, type: MediaType, year?: number): Promise<TorrentResult[]> {
+async function searchProwlarr(query: string, type: MediaType, year?: number, searchTitle?: string): Promise<TorrentResult[]> {
   const { prowlarr_url, prowlarr_api_key } = getSettings();
   if (!prowlarr_url || !prowlarr_api_key) return [];
 
@@ -138,14 +182,14 @@ async function searchProwlarr(query: string, type: MediaType, year?: number): Pr
         seeders: item.seeders as number | undefined,
         leechers: item.leechers as number | undefined,
         source: `Prowlarr · ${item.indexer || 'indexer'}`,
-      }, year))
+      }, year, searchTitle))
       .filter((r): r is TorrentResult => r !== null);
   } catch {
     return [];
   }
 }
 
-async function searchJackett(query: string, type: MediaType, year?: number): Promise<TorrentResult[]> {
+async function searchJackett(query: string, type: MediaType, year?: number, searchTitle?: string): Promise<TorrentResult[]> {
   const { jackett_url, jackett_api_key } = getSettings();
   if (!jackett_url || !jackett_api_key) return [];
 
@@ -170,14 +214,14 @@ async function searchJackett(query: string, type: MediaType, year?: number): Pro
         seeders: item.Seeders as number | undefined,
         leechers: item.Peers as number | undefined,
         source: `Jackett · ${item.Tracker || 'tracker'}`,
-      }, year))
+      }, year, searchTitle))
       .filter((r): r is TorrentResult => r !== null);
   } catch {
     return [];
   }
 }
 
-async function searchYts(title: string, year?: number): Promise<TorrentResult[]> {
+async function searchYts(title: string, year?: number, searchTitle?: string): Promise<TorrentResult[]> {
   try {
     const url = new URL('https://yts.mx/api/v2/list_movies.json');
     url.searchParams.set('query_term', title);
@@ -195,12 +239,12 @@ async function searchYts(title: string, year?: number): Promise<TorrentResult[]>
     };
 
     const movies = data.data?.movies || [];
-    let best = movies[0];
+    let best = movies.find(m => isRelevantTorrent(m.title, title)) ?? movies[0];
     if (year) {
-      const match = movies.find(m => m.year === year);
+      const match = movies.find(m => m.year === year && isRelevantTorrent(m.title, title));
       if (match) best = match;
     }
-    if (!best?.torrents?.length) return [];
+    if (!best?.torrents?.length || !isRelevantTorrent(best.title, title)) return [];
 
     return best.torrents
       .map(t => {
@@ -218,7 +262,7 @@ async function searchYts(title: string, year?: number): Promise<TorrentResult[]>
           seeders: t.seeds,
           leechers: t.peers,
           source: 'YTS',
-        }, year);
+        }, year, searchTitle);
       })
       .filter((r): r is TorrentResult => r !== null);
   } catch {
@@ -226,13 +270,18 @@ async function searchYts(title: string, year?: number): Promise<TorrentResult[]>
   }
 }
 
-async function searchEztv(imdbId: string, year?: number): Promise<TorrentResult[]> {
+async function searchEztv(imdbId: string, searchTitle: string, year?: number): Promise<TorrentResult[]> {
+  const numericId = normalizeImdbForEztv(imdbId);
+  if (!numericId) return [];
+
   try {
-    const url = `https://eztv.re/api/get-torrents?imdb_id=${imdbId}&limit=100`;
+    const url = `https://eztv.re/api/get-torrents?imdb_id=${encodeURIComponent(numericId)}&limit=100`;
     const res = await fetch(url, { signal: AbortSignal.timeout(12000) });
     if (!res.ok) return [];
 
     const data = (await res.json()) as {
+      imdb_id?: string;
+      torrents_count?: number;
       torrents?: Array<{
         title: string;
         magnet_url: string;
@@ -240,10 +289,18 @@ async function searchEztv(imdbId: string, year?: number): Promise<TorrentResult[
         seeds: number;
         peers: number;
         size_bytes: number;
+        imdb_id?: string;
       }>;
     };
 
-    return (data.torrents || [])
+    if (!data.torrents?.length) return [];
+
+    const responseId = String(data.imdb_id || '').replace(/t/gi, '');
+    if (responseId && responseId !== numericId && !responseId.endsWith(numericId) && !numericId.endsWith(responseId)) {
+      return [];
+    }
+
+    return data.torrents
       .map(t => normalizeResult({
         title: t.title,
         magnet_url: t.magnet_url,
@@ -252,7 +309,7 @@ async function searchEztv(imdbId: string, year?: number): Promise<TorrentResult[
         seeders: t.seeds,
         leechers: t.peers,
         source: 'EZTV',
-      }, year))
+      }, year, searchTitle))
       .filter((r): r is TorrentResult => r !== null);
   } catch {
     return [];
@@ -269,33 +326,32 @@ export async function searchTorrents(params: SearchParams): Promise<TorrentResul
   const sources: TorrentResult[] = [];
 
   const [prowlarr, jackett] = await Promise.all([
-    searchProwlarr(query, params.type, params.year),
-    searchJackett(query, params.type, params.year),
+    searchProwlarr(query, params.type, params.year, params.title),
+    searchJackett(query, params.type, params.year, params.title),
   ]);
   sources.push(...prowlarr, ...jackett);
 
   if (params.type === 'movie') {
-    const yts = await searchYts(params.title, params.year);
+    const yts = await searchYts(params.title, params.year, params.title);
     sources.push(...yts);
   }
 
   if (params.tmdb_id) {
     try {
       const ids = await getExternalIds(params.type, params.tmdb_id);
-      if (ids.imdb_id) {
-        if (params.type === 'series') {
-          const eztv = await searchEztv(ids.imdb_id, params.year);
-          sources.push(...eztv);
-        }
-        if (params.type === 'movie' && sources.length < 3) {
-          const jackettImdb = await searchJackett(`${ids.imdb_id}`, params.type, params.year);
-          sources.push(...jackettImdb);
-        }
+      if (ids.imdb_id && params.type === 'series') {
+        const eztv = await searchEztv(ids.imdb_id, params.title, params.year);
+        sources.push(...eztv);
+      }
+      if (ids.imdb_id && params.type === 'movie' && sources.length < 3) {
+        const jackettImdb = await searchJackett(ids.imdb_id, params.type, params.year, params.title);
+        sources.push(...jackettImdb);
       }
     } catch { /* TMDB opcional */ }
   }
 
-  return dedupeResults(sources).slice(0, 30);
+  const relevant = filterRelevant(sources, params.title);
+  return dedupeResults(relevant).slice(0, 30);
 }
 
 export function pickBestTorrent(results: TorrentResult[]): TorrentResult | null {
