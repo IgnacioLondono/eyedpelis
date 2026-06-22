@@ -73,6 +73,11 @@ export async function qbLogin(): Promise<{ session: QbSession } | { error: strin
 
     const body = (await res.text()).trim();
     if (!res.ok) {
+      if (res.status === 401) {
+        return {
+          error: 'qBittorrent rechazó el login (401). Añade QBITTORRENT_USER y QBITTORRENT_PASS en Portainer (deben coincidir con la Web UI en :18787) y redeploy.',
+        };
+      }
       return { error: `qBittorrent HTTP ${res.status} en ${baseUrl}` };
     }
     if (body === 'Fails.') {
