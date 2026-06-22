@@ -17,6 +17,10 @@ export function getSettings(): Settings {
     jellyfin_api_key: all.jellyfin_api_key || '',
     plex_url: all.plex_url || '',
     plex_token: all.plex_token || '',
+    prowlarr_url: all.prowlarr_url || process.env.PROWLARR_URL || '',
+    prowlarr_api_key: all.prowlarr_api_key || process.env.PROWLARR_API_KEY || '',
+    jackett_url: all.jackett_url || process.env.JACKETT_URL || '',
+    jackett_api_key: all.jackett_api_key || process.env.JACKETT_API_KEY || '',
     auth_enabled: all.auth_enabled !== 'false',
   };
 }
@@ -35,6 +39,4 @@ export function getTmdbApiKey(): string {
   return getSetting('tmdb_api_key') || process.env.TMDB_API_KEY || '';
 }
 
-export function isMediaReadOnly(): boolean {
-  return process.env.MEDIA_READ_ONLY === 'true';
-}
+export { isMediaReadOnly } from './services/filesystem.js';

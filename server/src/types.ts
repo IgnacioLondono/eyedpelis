@@ -68,6 +68,10 @@ export interface Settings {
   jellyfin_api_key: string;
   plex_url: string;
   plex_token: string;
+  prowlarr_url: string;
+  prowlarr_api_key: string;
+  jackett_url: string;
+  jackett_api_key: string;
   auth_enabled: boolean;
 }
 

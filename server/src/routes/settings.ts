@@ -8,9 +8,10 @@ const ALLOWED_KEYS = [
   'media_path', 'movies_path', 'series_path', 'tmdb_api_key',
   'scan_interval', 'auto_scan', 'qbittorrent_url', 'qbittorrent_user', 'qbittorrent_pass',
   'jellyfin_url', 'jellyfin_api_key', 'plex_url', 'plex_token', 'auth_enabled',
+  'prowlarr_url', 'prowlarr_api_key', 'jackett_url', 'jackett_api_key',
 ];
 
-const SECRET_KEYS = ['tmdb_api_key', 'jellyfin_api_key', 'plex_token', 'qbittorrent_pass'];
+const SECRET_KEYS = ['tmdb_api_key', 'jellyfin_api_key', 'plex_token', 'qbittorrent_pass', 'prowlarr_api_key', 'jackett_api_key'];
 
 router.get('/', (_req, res) => {
   const settings = getSettings();

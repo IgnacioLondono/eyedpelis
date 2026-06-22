@@ -11,7 +11,7 @@ services:
       - MEDIA_PATH=/media
       - MOVIES_PATH=Peliculas
       - SERIES_PATH=Series
-      - MEDIA_READ_ONLY=true
+      - MEDIA_READ_ONLY=false
       - TMDB_API_KEY=${TMDB_API_KEY:-}
       - JWT_SECRET=${JWT_SECRET:-cambia-este-secreto-en-produccion}
       - ADMIN_USER=${ADMIN_USER:-eyedpelis}
@@ -19,7 +19,7 @@ services:
       - AUTH_ENABLED=${AUTH_ENABLED:-true}
       - CLIENT_URL=${CLIENT_URL:-http://localhost:3001}
     volumes:
-      - /srv/dev-disk-by-uuid-a5b4e34c-5e9b-430c-93ad-0473fe6143d2/data/Videos:/media:ro
+      - /srv/dev-disk-by-uuid-a5b4e34c-5e9b-430c-93ad-0473fe6143d2/data/Videos:/media
       - ./data:/app/server/data
     networks:
       - eyedpelis-net

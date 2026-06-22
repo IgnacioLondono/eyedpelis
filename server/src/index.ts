@@ -12,6 +12,7 @@ import settingsRoutes from './routes/settings.js';
 import streamRoutes from './routes/stream.js';
 import authRoutes from './routes/auth.js';
 import integrationRoutes from './routes/integrations.js';
+import filesRoutes from './routes/files.js';
 import { ensureMediaDirs, scanLibrary } from './services/scanner.js';
 import { startDownloadProcessor } from './services/downloadManager.js';
 import { getSetting } from './db/database.js';
@@ -51,6 +52,7 @@ app.use('/api/downloads', downloadRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/stream', streamRoutes);
 app.use('/api/integrations', integrationRoutes);
+app.use('/api/files', filesRoutes);
 
 const clientDist = path.join(__dirname, '../../client/dist');
 app.use(express.static(clientDist));

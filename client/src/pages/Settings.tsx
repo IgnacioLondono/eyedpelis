@@ -18,6 +18,10 @@ export default function SettingsPage() {
     jellyfin_api_key: '',
     plex_url: '',
     plex_token: '',
+    prowlarr_url: '',
+    prowlarr_api_key: '',
+    jackett_url: '',
+    jackett_api_key: '',
     auth_enabled: true,
   });
   const [saving, setSaving] = useState(false);
@@ -193,36 +197,73 @@ export default function SettingsPage() {
           />
         </section>
 
-        {/* qBittorrent */}
+        {/* qBittorrent & indexadores */}
         <section className="bg-surface-card border border-surface-border rounded-xl p-6">
           <div className="flex items-center gap-2 mb-4">
             <Server size={20} className="text-accent" />
-            <h2 className="text-lg font-semibold">qBittorrent (opcional)</h2>
+            <h2 className="text-lg font-semibold">Descargas (qBittorrent + indexadores)</h2>
           </div>
           <p className="text-sm text-gray-400 mb-4">
-            Para descargas via torrent/magnet. Deja vacío si solo usas URLs directas.
+            qBittorrent gestiona los torrents. Prowlarr o Jackett amplían la búsqueda automática a cientos de indexadores.
           </p>
           <div className="space-y-4">
-            <input
-              type="text"
-              value={settings.qbittorrent_url}
-              onChange={e => update('qbittorrent_url', e.target.value)}
-              placeholder="http://localhost:8080"
-              className="w-full bg-surface border border-surface-border rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-accent"
-            />
+            <div>
+              <label className="text-sm text-gray-400 block mb-1">qBittorrent URL</label>
+              <input
+                type="text"
+                value={settings.qbittorrent_url}
+                onChange={e => update('qbittorrent_url', e.target.value)}
+                placeholder="http://localhost:8080"
+                className="w-full bg-surface border border-surface-border rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-accent"
+              />
+            </div>
             <div className="grid grid-cols-2 gap-4">
               <input
                 type="text"
                 value={settings.qbittorrent_user}
                 onChange={e => update('qbittorrent_user', e.target.value)}
-                placeholder="Usuario"
+                placeholder="Usuario qBittorrent"
                 className="w-full bg-surface border border-surface-border rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-accent"
               />
               <input
                 type="password"
                 value={settings.qbittorrent_pass}
                 onChange={e => update('qbittorrent_pass', e.target.value)}
-                placeholder="Contraseña"
+                placeholder="Contraseña qBittorrent"
+                className="w-full bg-surface border border-surface-border rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-accent"
+              />
+            </div>
+            <div className="border-t border-surface-border pt-4">
+              <label className="text-sm text-gray-400 block mb-1">Prowlarr URL (recomendado)</label>
+              <input
+                type="text"
+                value={settings.prowlarr_url}
+                onChange={e => update('prowlarr_url', e.target.value)}
+                placeholder="http://localhost:9696"
+                className="w-full bg-surface border border-surface-border rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-accent mb-2"
+              />
+              <input
+                type="password"
+                value={settings.prowlarr_api_key}
+                onChange={e => update('prowlarr_api_key', e.target.value)}
+                placeholder="API Key de Prowlarr"
+                className="w-full bg-surface border border-surface-border rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-accent"
+              />
+            </div>
+            <div>
+              <label className="text-sm text-gray-400 block mb-1">Jackett URL (alternativa)</label>
+              <input
+                type="text"
+                value={settings.jackett_url}
+                onChange={e => update('jackett_url', e.target.value)}
+                placeholder="http://localhost:9117"
+                className="w-full bg-surface border border-surface-border rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-accent mb-2"
+              />
+              <input
+                type="password"
+                value={settings.jackett_api_key}
+                onChange={e => update('jackett_api_key', e.target.value)}
+                placeholder="API Key de Jackett"
                 className="w-full bg-surface border border-surface-border rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-accent"
               />
             </div>

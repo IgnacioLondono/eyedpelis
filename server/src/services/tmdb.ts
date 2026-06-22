@@ -171,6 +171,13 @@ export async function getSeriesDetails(id: number) {
   return tmdbFetch(`/tv/${id}`);
 }
 
+export async function getExternalIds(type: MediaType, tmdbId: number) {
+  const endpoint = type === 'movie'
+    ? `/movie/${tmdbId}/external_ids`
+    : `/tv/${tmdbId}/external_ids`;
+  return tmdbFetch<{ imdb_id: string | null; tvdb_id: number | null }>(endpoint);
+}
+
 export interface TmdbSeasonEpisode {
   episode_number: number;
   name: string;

@@ -79,6 +79,16 @@ export const api = {
   getSeasonDetails: (seriesId: number, seasonNumber: number) =>
     request<import('./utils/tmdbHelpers').TmdbSeasonDetails>(`/search/season/${seriesId}/${seasonNumber}`),
   getDownloads: () => request<import('./types').DownloadItem[]>('/downloads'),
+  searchTorrents: (params: { title: string; type: 'movie' | 'series'; year?: number; tmdb_id?: number }) => {
+    const q = new URLSearchParams();
+    q.set('title', params.title);
+    q.set('type', params.type);
+    if (params.year) q.set('year', String(params.year));
+    if (params.tmdb_id) q.set('tmdb_id', String(params.tmdb_id));
+    return request<{ results: import('./types').TorrentResult[]; capabilities: Record<string, boolean> }>(
+      `/downloads/search?${q.toString()}`,
+    );
+  },
   addDownload: (data: Record<string, unknown>) =>
     request<import('./types').DownloadItem>('/downloads', {
       method: 'POST',
@@ -103,6 +113,35 @@ export const api = {
       body: JSON.stringify(data),
     }),
   scanLibrary: () => request<{ added: number; updated: number; removed: number; total: number }>('/settings/scan', { method: 'POST' }),
+  getFilesInfo: () =>
+    request<{ mediaPath: string; moviesPath: string; seriesPath: string; readOnly: boolean }>('/files/info'),
+  listFiles: (path = '') =>
+    request<{ path: string; entries: Array<{
+      name: string; path: string; type: 'file' | 'directory'; size: number;
+      modified: string; extension: string | null; category: 'video' | 'subtitle' | 'other';
+    }> }>(`/files?path=${encodeURIComponent(path)}`),
+  mkdirFile: (path: string, name: string) =>
+    request('/files/mkdir', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path, name }),
+    }),
+  renameFile: (path: string, newName: string) =>
+    request<{ entry: unknown; scan: { added: number; updated: number; removed: number; total: number } }>(
+      '/files/rename',
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path, newName }),
+      },
+    ),
+  deleteFile: (path: string) =>
+    request<{ ok: boolean; scan: { added: number; updated: number; removed: number; total: number } }>(
+      `/files?path=${encodeURIComponent(path)}`,
+      { method: 'DELETE' },
+    ),
+  scanFilesLibrary: () =>
+    request<{ added: number; updated: number; removed: number; total: number }>('/files/scan', { method: 'POST' }),
   reEnrichMetadata: () => request<{ enriched: number }>('/settings/re-enrich', { method: 'POST' }),
   testJellyfin: () => request<{ ok: boolean; message: string }>('/integrations/jellyfin/test'),
   testPlex: () => request<{ ok: boolean; message: string }>('/integrations/plex/test'),

@@ -22,7 +22,7 @@ services:
       MEDIA_PATH: "/media"
       MOVIES_PATH: "Peliculas"
       SERIES_PATH: "Series"
-      MEDIA_READ_ONLY: "true"
+      MEDIA_READ_ONLY: "false"
       TMDB_API_KEY: "PEGA_TU_API_KEY_AQUI"
       JWT_SECRET: "cambia-este-secreto-por-algo-largo-y-aleatorio"
       ADMIN_USER: "eyedpelis"
@@ -30,8 +30,8 @@ services:
       AUTH_ENABLED: "true"
       CLIENT_URL: "http://192.168.1.100:3001"
     volumes:
-      # Tu carpeta Videos — SOLO LECTURA (no toca Peliculas ni Series)
-      - /srv/dev-disk-by-uuid-a5b4e34c-5e9b-430c-93ad-0473fe6143d2/data/Videos:/media:ro
+      # Tu carpeta Videos — lectura/escritura (gestión desde Archivos en la app)
+      - /srv/dev-disk-by-uuid-a5b4e34c-5e9b-430c-93ad-0473fe6143d2/data/Videos:/media
       # Datos de la app (separado de tus videos)
       - /opt/eyedpelis/data:/app/server/data
     networks:

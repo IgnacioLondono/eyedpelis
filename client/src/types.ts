@@ -55,6 +55,17 @@ export interface DownloadItem {
   created_at: string;
 }
 
+export interface TorrentResult {
+  title: string;
+  magnet_url: string | null;
+  torrent_url: string | null;
+  size_bytes: number;
+  seeders: number;
+  leechers: number;
+  source: string;
+  score: number;
+}
+
 export interface LibraryStats {
   totalMovies: number;
   totalSeries: number;
@@ -77,5 +88,9 @@ export interface Settings {
   jellyfin_api_key: string;
   plex_url: string;
   plex_token: string;
+  prowlarr_url: string;
+  prowlarr_api_key: string;
+  jackett_url: string;
+  jackett_api_key: string;
   auth_enabled: boolean;
 }

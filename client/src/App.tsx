@@ -8,6 +8,7 @@ import Series from './pages/Series';
 import Search from './pages/Search';
 import Downloads from './pages/Downloads';
 import Settings from './pages/Settings';
+import FileManager from './pages/FileManager';
 import Detail from './pages/Detail';
 import MediaDetail from './pages/MediaDetail';
 import Player from './pages/Player';
@@ -24,6 +25,7 @@ export default function App() {
             <Route path="/search" element={<Search />} />
             <Route path="/downloads" element={<Downloads />} />
             <Route path="/settings" element={<Settings />} />
+            <Route path="/files" element={<FileManager />} />
             <Route path="/media/:id" element={<MediaDetail />} />
             <Route path="/detail/:type/:id" element={<Detail />} />
           </Route>

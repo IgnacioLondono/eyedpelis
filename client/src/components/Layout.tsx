@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { Film, Tv, Search, Download, Settings, Home, Menu, X, LogOut, Eye } from 'lucide-react';
+import { Film, Tv, Search, Download, Settings, Home, Menu, X, LogOut, Eye, FolderOpen } from 'lucide-react';
 import { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import PageTransition from './PageTransition';
@@ -10,6 +10,7 @@ const navItems = [
   { to: '/series', icon: Tv, label: 'Series' },
   { to: '/search', icon: Search, label: 'Buscar' },
   { to: '/downloads', icon: Download, label: 'Descargas' },
+  { to: '/files', icon: FolderOpen, label: 'Archivos' },
   { to: '/settings', icon: Settings, label: 'Config' },
 ];
 
