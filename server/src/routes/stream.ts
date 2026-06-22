@@ -8,10 +8,10 @@ import { probeMedia, codecLabel } from '../services/mediaProbe.js';
 
 const router = Router();
 
-/** Seek rápido (solo antes del input) — suficiente cuando el vídeo va por separado. */
-function buildFastSeekArgs(filePath: string, startSec: number): string[] {
+/** Seek preciso (después de -i): alinea audio y vídeo al adelantar. */
+function buildSeekArgs(filePath: string, startSec: number): string[] {
   if (startSec <= 0.5) return ['-i', filePath];
-  return ['-ss', startSec.toFixed(2), '-i', filePath];
+  return ['-i', filePath, '-ss', startSec.toFixed(3)];
 }
 
 function resolveAudioMap(probe: Awaited<ReturnType<typeof probeMedia>>, audioIdx: number): string {
@@ -129,11 +129,12 @@ router.get('/:id/compat-audio', async (req, res) => {
 
   pipeFfmpeg(req, res, [
     '-hide_banner', '-loglevel', 'error',
-    ...buildFastSeekArgs(item.file_path, startSec),
+    ...buildSeekArgs(item.file_path, startSec),
     '-map', audioMap,
     '-vn',
     '-c:a', 'aac', '-b:a', '192k', '-ac', '2', '-ar', '48000',
     '-af', 'aresample=async=1:first_pts=0',
+    '-avoid_negative_ts', 'make_zero',
     '-f', 'adts',
     'pipe:1',
   ], 'compat-audio');
@@ -159,11 +160,12 @@ router.get('/:id/compat', async (req, res) => {
 
   pipeFfmpeg(req, res, [
     '-hide_banner', '-loglevel', 'error',
-    ...buildFastSeekArgs(item.file_path, startSec),
+    ...buildSeekArgs(item.file_path, startSec),
     '-map', '0:v:0?',
     '-map', audioMap,
     '-c:v', 'copy',
     '-c:a', 'aac', '-b:a', '192k', '-ac', '2', '-ar', '48000',
+    '-avoid_negative_ts', 'make_zero',
     '-fflags', '+genpts',
     '-reset_timestamps', '1',
     '-f', 'mp4',

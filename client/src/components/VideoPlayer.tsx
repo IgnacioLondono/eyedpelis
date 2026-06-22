@@ -83,21 +83,21 @@ function initialPlayback(
   needsCompat: boolean,
   audioIndex: number,
 ): Playback {
-  // Transmux (vídeo+audio en un solo <video>) es más fiable que split en móvil/TV
-  if (needsCompat && compatSrc) {
-    return {
-      engine: 'transcode',
-      videoSrc,
-      muxSrc: buildStreamUrl(compatSrc, audioIndex, 0, 0),
-      audioIndex,
-      offset: 0,
-    };
-  }
+  // Split: vídeo directo (seek nativo preciso) + audio transcodificado aparte
   if (needsCompat && compatAudioSrc) {
     return {
       engine: 'split',
       videoSrc,
       audioSrc: buildStreamUrl(compatAudioSrc, audioIndex, 0, 0),
+      audioIndex,
+      offset: 0,
+    };
+  }
+  if (needsCompat && compatSrc) {
+    return {
+      engine: 'transcode',
+      videoSrc,
+      muxSrc: buildStreamUrl(compatSrc, audioIndex, 0, 0),
       audioIndex,
       offset: 0,
     };
@@ -182,6 +182,8 @@ export default function VideoPlayer({
   const streamGenRef = useRef(0);
   const audioAnchorRef = useRef(0);
   const audioReloadingRef = useRef(false);
+  const resumeAfterAudioReloadRef = useRef(false);
+  const seekingRef = useRef(false);
   const directAudioCheckRef = useRef<ReturnType<typeof setTimeout>>();
   const directAudioFallbackRef = useRef(false);
 
@@ -227,20 +229,30 @@ export default function VideoPlayer({
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
   const bufPct = duration > 0 ? (buffered / duration) * 100 : 0;
 
-  const syncAudioElement = useCallback(() => {
+  const syncAudioElement = useCallback((force = false) => {
     const v = videoRef.current;
     const a = audioRef.current;
     if (!v || !a || playbackRef.current?.engine !== 'split') return;
     const target = Math.max(0, v.currentTime - audioAnchorRef.current);
-    if (Math.abs(a.currentTime - target) > 0.15) a.currentTime = target;
-    if (!v.paused && a.paused) tryPlay(a);
+    if (force || Math.abs(a.currentTime - target) > 0.12) {
+      try { a.currentTime = target; } catch { /* ignore */ }
+    }
+    if (!v.paused && a.paused && !audioReloadingRef.current) tryPlay(a);
   }, []);
 
-  const reloadAudio = useCallback((atSec: number, audioIndex: number) => {
+  const reloadAudio = useCallback((atSec: number, audioIndex: number, resume = false) => {
     if (!compatAudioSrc) return;
+    const v = videoRef.current;
+    if (v && !v.paused) resume = true;
+    if (v) v.pause();
+
     streamGenRef.current += 1;
     audioAnchorRef.current = atSec;
     audioReloadingRef.current = true;
+    resumeAfterAudioReloadRef.current = resume;
+    seekingRef.current = true;
+    setBuffering(true);
+
     const audioSrc = buildStreamUrl(compatAudioSrc, audioIndex, atSec, streamGenRef.current);
     setPlayback(p => {
       const next = { ...p, engine: 'split' as const, videoSrc: src, audioSrc, audioIndex, offset: 0 };
@@ -251,9 +263,15 @@ export default function VideoPlayer({
 
   const goTranscode = useCallback((audioIndex: number, atSec: number) => {
     if (!compatSrc) return;
+    const v = videoRef.current;
+    const wasPlaying = v ? !v.paused : false;
+    if (v) v.pause();
+
     streamGenRef.current += 1;
+    seekingRef.current = true;
     setBuffering(true);
     setError(null);
+    resumeAfterAudioReloadRef.current = wasPlaying;
     const next: Playback = {
       engine: 'transcode',
       videoSrc: src,
@@ -272,25 +290,28 @@ export default function VideoPlayer({
     const v = videoRef.current;
     if (!v) return;
 
+    timeRef.current = t;
+    setCurrentTime(t);
+    setActiveCue(null);
+
     if (isTranscode && compatSrc) {
-      v.pause();
-      setBuffering(true);
-      setCurrentTime(t);
-      timeRef.current = t;
       if (audioSeekTimer.current) clearTimeout(audioSeekTimer.current);
-      audioSeekTimer.current = setTimeout(() => goTranscode(playback.audioIndex, t), 300);
+      audioSeekTimer.current = setTimeout(() => goTranscode(playback.audioIndex, t), 200);
       return;
     }
 
-    v.currentTime = t;
-    timeRef.current = t;
-    setCurrentTime(t);
-
     if (isSplit && compatAudioSrc) {
+      seekingRef.current = true;
+      const wasPlaying = !v.paused;
+      v.pause();
+      try { v.currentTime = t; } catch { /* ignore */ }
       audioAnchorRef.current = t;
       if (audioSeekTimer.current) clearTimeout(audioSeekTimer.current);
-      audioSeekTimer.current = setTimeout(() => reloadAudio(t, playback.audioIndex), 250);
+      audioSeekTimer.current = setTimeout(() => reloadAudio(t, playback.audioIndex, wasPlaying), 150);
+      return;
     }
+
+    try { v.currentTime = t; } catch { /* ignore */ }
   }, [duration, isTranscode, isSplit, compatSrc, compatAudioSrc, playback.audioIndex, goTranscode, reloadAudio]);
 
   const loadSubs = useCallback(async (idx: number) => {
@@ -345,10 +366,10 @@ export default function VideoPlayer({
   const selectAudio = (idx: number) => {
     if (idx === playback.audioIndex) { setShowLangMenu(false); return; }
     const t = timeRef.current;
-    if (compatSrc) {
+    if (compatAudioSrc) {
+      reloadAudio(t, idx, playing);
+    } else if (compatSrc) {
       goTranscode(idx, t);
-    } else if (compatAudioSrc) {
-      reloadAudio(t, idx);
     }
     setShowLangMenu(false);
   };
@@ -440,7 +461,9 @@ export default function VideoPlayer({
       const cues = cuesRef.current;
       const pb = playbackRef.current;
       if (v && idx >= 0 && cues.length > 0 && pb) {
-        const t = pb.engine === 'transcode' ? pb.offset + v.currentTime : v.currentTime;
+        const t = pb.engine === 'transcode'
+          ? pb.offset + v.currentTime
+          : timeRef.current;
         setActiveCue(findActiveCue(cues, t)?.text ?? null);
       }
       frame = requestAnimationFrame(tick);
@@ -476,7 +499,7 @@ export default function VideoPlayer({
 
   useEffect(() => {
     if (!isSplit) return;
-    const id = window.setInterval(syncAudioElement, 400);
+    const id = window.setInterval(() => syncAudioElement(), 250);
     return () => clearInterval(id);
   }, [isSplit, syncAudioElement, playback.audioSrc]);
 
@@ -579,14 +602,20 @@ export default function VideoPlayer({
       const noAudioDecoded = typeof decoded === 'number' && decoded === 0 && v.currentTime > 1;
       if (noAudioDecoded) {
         directAudioFallbackRef.current = true;
-        goTranscode(playback.audioIndex, timeRef.current);
+        const t = timeRef.current;
+        const resume = !v.paused;
+        if (compatAudioSrc) {
+          reloadAudio(t, playback.audioIndex, resume);
+        } else if (compatSrc) {
+          goTranscode(playback.audioIndex, t);
+        }
       }
     }, 2500);
 
     return () => {
       if (directAudioCheckRef.current) clearTimeout(directAudioCheckRef.current);
     };
-  }, [playback.engine, playback.audioIndex, compatSrc, goTranscode, videoSrc]);
+  }, [playback.engine, playback.audioIndex, compatSrc, compatAudioSrc, goTranscode, reloadAudio, videoSrc]);
 
   return (
     <div ref={containerRef} className="relative w-full h-screen bg-black overflow-hidden select-none"
@@ -610,10 +639,21 @@ export default function VideoPlayer({
         }}
         onPause={() => { setPlaying(false); setShowControls(true); audioRef.current?.pause(); }}
         onWaiting={() => { if (!audioReloadingRef.current) setBuffering(true); }}
-        onCanPlay={() => { setBuffering(false); tryPlay(videoRef.current!); }}
-        onTimeUpdate={() => {
+        onCanPlay={() => {
+          setBuffering(false);
+          seekingRef.current = false;
           const v = videoRef.current;
           if (!v) return;
+          if (isTranscode && resumeAfterAudioReloadRef.current) {
+            resumeAfterAudioReloadRef.current = false;
+            tryPlay(v);
+          } else if (!isSplit) {
+            tryPlay(v);
+          }
+        }}
+        onTimeUpdate={() => {
+          const v = videoRef.current;
+          if (!v || seekingRef.current) return;
           const pb = playbackRef.current;
           const abs = pb?.engine === 'transcode' ? pb.offset + v.currentTime : v.currentTime;
           timeRef.current = abs;
@@ -654,11 +694,21 @@ export default function VideoPlayer({
           className="hidden"
           onCanPlay={() => {
             audioReloadingRef.current = false;
-            syncAudioElement();
+            seekingRef.current = false;
+            setBuffering(false);
+            syncAudioElement(true);
             const v = videoRef.current;
             const a = audioRef.current;
-            if (v && a && !v.paused) tryPlay(a);
+            if (!v || !a) return;
+            if (resumeAfterAudioReloadRef.current) {
+              resumeAfterAudioReloadRef.current = false;
+              tryPlay(v);
+              tryPlay(a);
+            } else if (!v.paused) {
+              tryPlay(a);
+            }
           }}
+          onTimeUpdate={() => syncAudioElement()}
           onPlaying={() => { audioReloadingRef.current = false; }}
           onError={() => {
             audioReloadingRef.current = false;
