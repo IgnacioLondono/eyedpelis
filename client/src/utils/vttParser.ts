@@ -126,7 +126,7 @@ export function findActiveCue(cues: VttCue[], timeSec: number): VttCue | null {
 
   for (let i = Math.min(hi, cues.length - 1); i >= 0; i--) {
     const cue = cues[i];
-    if (timeSec >= cue.start && timeSec < cue.end) return cue;
+    if (timeSec >= cue.start && timeSec <= cue.end) return cue;
   }
   return null;
 }

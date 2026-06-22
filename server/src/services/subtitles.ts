@@ -38,6 +38,41 @@ function langMatches(a: string, b: string): boolean {
   return x === y || x.startsWith(y) || y.startsWith(x) || (x.startsWith('es') && y.startsWith('es'));
 }
 
+function normalizeMediaName(name: string): string {
+  return name
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .replace(/[^\w]/g, '');
+}
+
+function subtitleMatchesVideo(fileBase: string, videoBase: string): boolean {
+  if (fileBase === videoBase) return true;
+  if (fileBase.startsWith(videoBase + '.') || fileBase.startsWith(videoBase + ' ')) return true;
+  if (videoBase.startsWith(fileBase + '.') || videoBase.startsWith(fileBase + ' ')) return true;
+  const nf = normalizeMediaName(fileBase);
+  const nv = normalizeMediaName(videoBase);
+  if (!nf || !nv) return false;
+  return nf === nv || nf.startsWith(nv) || nv.startsWith(nf);
+}
+
+function parseLangFromSuffix(suffix: string): string {
+  const token = suffix.split(/[\s._-]+/).find(t => t.length >= 2)?.toLowerCase() || 'und';
+  if (token === 'spanish' || token === 'castellano' || token === 'latino') return 'es';
+  if (token === 'english') return 'en';
+  return token;
+}
+
+export function readSubtitleText(filePath: string): string {
+  const buf = fs.readFileSync(filePath);
+  if (buf.length >= 3 && buf[0] === 0xEF && buf[1] === 0xBB && buf[2] === 0xBF) {
+    return buf.subarray(3).toString('utf-8');
+  }
+  const utf8 = buf.toString('utf-8');
+  if (!utf8.includes('\uFFFD')) return utf8;
+  return buf.toString('latin1');
+}
+
 export function findSubtitles(videoPath: string): SubtitleTrack[] {
   const dir = path.dirname(videoPath);
   const base = path.basename(videoPath, path.extname(videoPath));
@@ -50,15 +85,12 @@ export function findSubtitles(videoPath: string): SubtitleTrack[] {
     if (!SUBTITLE_EXTENSIONS.has(ext)) continue;
 
     const fileBase = path.basename(file, ext);
-    const isMatch =
-      fileBase === base ||
-      fileBase.startsWith(base + '.') ||
-      fileBase.startsWith(base + ' ');
+    if (!subtitleMatchesVideo(fileBase, base)) continue;
 
-    if (!isMatch) continue;
-
-    const suffix = fileBase.slice(base.length).replace(/^[\s._-]+/, '');
-    const langCode = suffix.split(/[\s._-]/)[0]?.toLowerCase() || 'und';
+    const suffix = fileBase.length >= base.length
+      ? fileBase.slice(base.length).replace(/^[\s._-]+/, '')
+      : fileBase;
+    const langCode = parseLangFromSuffix(suffix);
     const label = langLabelFromCode(langCode);
 
     tracks.push({
@@ -120,21 +152,25 @@ function convertFileToVtt(filePath: string): Promise<string> {
 
 export function getSubtitleContent(filePath: string): { content: string; contentType: string } {
   const ext = path.extname(filePath).toLowerCase();
-  const raw = fs.readFileSync(filePath, 'utf-8');
+  const raw = readSubtitleText(filePath);
 
   if (ext === '.vtt') {
-    return { content: raw.startsWith('WEBVTT') ? raw : `WEBVTT\n\n${raw}`, contentType: 'text/vtt' };
+    return { content: raw.startsWith('WEBVTT') ? raw : `WEBVTT\n\n${raw}`, contentType: 'text/vtt; charset=utf-8' };
   }
   if (ext === '.srt') {
-    return { content: srtToVtt(raw), contentType: 'text/vtt' };
+    return { content: srtToVtt(raw), contentType: 'text/vtt; charset=utf-8' };
   }
-  return { content: raw, contentType: 'text/plain' };
+  return { content: raw, contentType: 'text/plain; charset=utf-8' };
 }
 
 export async function getSubtitleTrackContent(track: SubtitleTrack): Promise<{ content: string; contentType: string }> {
+  if (track.bitmap) {
+    throw new Error('Subtítulo de imagen (PGS/VobSub): añade un archivo .srt junto al vídeo');
+  }
+
   if (track.embedded && track.subIndex != null) {
     const content = await getEmbeddedSubtitleVtt(track.path, track.subIndex, track.streamIndex);
-    return { content, contentType: 'text/vtt' };
+    return { content, contentType: 'text/vtt; charset=utf-8' };
   }
 
   if (!track.path || !fs.existsSync(track.path)) {
@@ -144,7 +180,7 @@ export async function getSubtitleTrackContent(track: SubtitleTrack): Promise<{ c
   const ext = path.extname(track.path).toLowerCase();
   if (ext === '.ass' || ext === '.ssa') {
     const content = await convertFileToVtt(track.path);
-    return { content, contentType: 'text/vtt' };
+    return { content, contentType: 'text/vtt; charset=utf-8' };
   }
 
   return getSubtitleContent(track.path);

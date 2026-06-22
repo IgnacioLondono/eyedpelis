@@ -31,6 +31,8 @@ export interface SubtitleTrack {
   format: 'srt' | 'vtt' | 'ass' | 'ssa';
   /** Subtítulo dentro del contenedor MKV/MP4 */
   embedded?: boolean;
+  /** PGS/VobSub — no convertible a texto en el navegador */
+  bitmap?: boolean;
   /** Índice de pista de subtítulo para ffmpeg (-map 0:s:N) */
   subIndex?: number;
   streamIndex?: number;

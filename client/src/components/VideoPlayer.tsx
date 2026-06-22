@@ -12,6 +12,7 @@ interface SubtitleOption {
   label: string;
   src: string;
   language: string;
+  bitmap?: boolean;
 }
 
 interface AudioOption {
@@ -317,6 +318,10 @@ export default function VideoPlayer({
   const loadSubs = useCallback(async (idx: number) => {
     const sub = subtitles.find(s => s.index === idx);
     if (!sub) { setSubtitleCues([]); cuesRef.current = []; return; }
+    if (sub.bitmap) {
+      setSubError('Subtítulo de imagen: añade un .srt junto al vídeo');
+      return;
+    }
 
     if (cuesCache.current.has(idx)) {
       const cached = cuesCache.current.get(idx)!;
@@ -330,19 +335,31 @@ export default function VideoPlayer({
     setSubError(null);
     try {
       const token = getAuthToken();
-      const res = await fetch(sub.src, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const res = await fetch(sub.src, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        signal: AbortSignal.timeout(90000),
+      });
       const text = await res.text();
-      if (!text.includes('-->')) throw new Error('formato inválido');
+      if (!res.ok) {
+        let msg = `HTTP ${res.status}`;
+        try {
+          const err = JSON.parse(text) as { error?: string };
+          if (err.error) msg = err.error;
+        } catch { /* no JSON */ }
+        throw new Error(msg);
+      }
       const cues = parseVtt(text);
+      if (cues.length === 0) {
+        throw new Error('No se pudieron leer los subtítulos (formato vacío o no compatible)');
+      }
       cuesCache.current.set(idx, cues);
       setSubtitleCues(cues);
       cuesRef.current = cues;
-      if (cues.length === 0) setSubError('No se pudieron leer los subtítulos');
-    } catch {
+      setSubError(null);
+    } catch (err) {
       setSubtitleCues([]);
       cuesRef.current = [];
-      setSubError('Error al cargar subtítulos');
+      setSubError(err instanceof Error ? err.message : 'Error al cargar subtítulos');
     } finally {
       setLoadingSubs(false);
     }
@@ -436,7 +453,7 @@ export default function VideoPlayer({
     playbackRef.current = pb;
     setPlayback(pb);
     if (knownDuration) setDuration(knownDuration);
-  }, [src, compatSrc, compatAudioSrc, needsAudioCompat, preferredAudioIndex, knownDuration]);
+  }, [src, needsAudioCompat, preferredAudioIndex, knownDuration]);
 
   useEffect(() => {
     if (activeSub >= 0) loadSubs(activeSub);
@@ -450,7 +467,8 @@ export default function VideoPlayer({
       const l = (s.language || '').toLowerCase();
       return l.startsWith('es') || l === 'spa';
     });
-    if (es) selectSub(es.index);
+    const pick = es || subtitles[0];
+    if (pick) selectSub(pick.index);
   }, [subtitles]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -461,9 +479,15 @@ export default function VideoPlayer({
       const cues = cuesRef.current;
       const pb = playbackRef.current;
       if (v && idx >= 0 && cues.length > 0 && pb) {
-        const t = pb.engine === 'transcode'
-          ? pb.offset + v.currentTime
-          : timeRef.current;
+        let t: number;
+        if (pb.engine === 'transcode') {
+          t = pb.offset + v.currentTime;
+        } else if (pb.engine === 'split') {
+          const a = audioRef.current;
+          t = a && a.currentTime > 0 ? pb.offset + a.currentTime : timeRef.current;
+        } else {
+          t = timeRef.current;
+        }
         setActiveCue(findActiveCue(cues, t)?.text ?? null);
       }
       frame = requestAnimationFrame(tick);

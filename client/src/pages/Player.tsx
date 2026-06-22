@@ -75,12 +75,15 @@ export default function Player() {
     title = `${media.title} · T${String(media.season).padStart(2, '0')}E${String(media.episode).padStart(2, '0')}${epLabel}`;
   }
 
-  const subtitles = subtitleTracks.map((sub, index) => ({
-    index,
-    label: sub.label,
-    src: api.subtitleUrl(media.id, index),
-    language: sub.language,
-  }));
+  const subtitles = subtitleTracks
+    .map((sub, index) => ({
+      index,
+      label: sub.label,
+      src: api.subtitleUrl(media.id, index),
+      language: sub.language,
+      bitmap: sub.bitmap,
+    }))
+    .filter(sub => !sub.bitmap);
 
   return (
     <VideoPlayer

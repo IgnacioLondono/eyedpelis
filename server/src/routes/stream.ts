@@ -50,30 +50,37 @@ async function syncSubtitles(item: NonNullable<ReturnType<typeof getMediaById>>)
 }
 
 router.get('/:id/subtitle/:index', async (req, res) => {
-  const item = getMediaById(parseInt(req.params.id));
+  const id = parseInt(req.params.id);
   const index = parseInt(req.params.index);
-  let track = item?.subtitles?.[index];
+  const item = getMediaById(id);
 
   if (!item) return res.status(404).json({ error: 'No encontrado' });
-
-  if (!track && item.file_path) {
-    const synced = await syncSubtitles(item);
-    track = synced[index];
+  if (!Number.isFinite(index) || index < 0) {
+    return res.status(400).json({ error: 'Índice de subtítulo inválido' });
   }
 
+  const synced = item.file_path && fs.existsSync(item.file_path)
+    ? await syncSubtitles(item)
+    : (item.subtitles || []);
+  const track = synced[index];
+
   if (!track) {
-    return res.status(404).json({ error: 'Subtítulo no encontrado' });
+    return res.status(404).json({ error: `Subtítulo #${index} no encontrado (${synced.length} disponibles)` });
   }
 
   try {
     const { content, contentType } = await getSubtitleTrackContent(track);
+    if (!content.includes('-->')) {
+      return res.status(422).json({ error: 'El subtítulo no tiene diálogos legibles' });
+    }
     res.setHeader('Content-Type', contentType);
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Cache-Control', track.embedded ? 'public, max-age=86400' : 'public, max-age=3600');
     res.send(content);
   } catch (err) {
-    console.error('[subtitle]', err);
-    res.status(500).json({ error: 'No se pudo extraer el subtítulo' });
+    const message = err instanceof Error ? err.message : 'No se pudo extraer el subtítulo';
+    console.error('[subtitle]', id, index, message);
+    res.status(500).json({ error: message });
   }
 });
 

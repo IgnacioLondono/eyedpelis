@@ -4,6 +4,7 @@ export interface SubtitleTrack {
   language: string;
   format: string;
   embedded?: boolean;
+  bitmap?: boolean;
 }
 
 export interface MediaItem {
