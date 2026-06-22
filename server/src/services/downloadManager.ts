@@ -155,16 +155,16 @@ export async function syncActiveDownloads() {
   );
   if (!active.length || !settings.qbittorrent_url) return;
 
-  const session = await qbLogin();
-  if (!session) return;
+  const login = await qbLogin();
+  if ('error' in login) return;
 
   for (const item of active) {
     try {
       let hash = item.qb_hash || hashFromMagnetOrUrl(item.magnet_url || item.torrent_url || '');
       let torrent: QbTorrent | null = null;
 
-      if (hash) torrent = await qbGetTorrent(session, hash);
-      if (!torrent) torrent = await qbFindRecentTorrent(session, item.title);
+      if (hash) torrent = await qbGetTorrent(login.session, hash);
+      if (!torrent) torrent = await qbFindRecentTorrent(login.session, item.title);
       if (!torrent) continue;
 
       applyTorrentState(item, torrent);
@@ -246,11 +246,11 @@ async function downloadDirect(item: DownloadItem) {
 }
 
 async function downloadViaQbittorrent(item: DownloadItem) {
-  const session = await qbLogin();
-  if (!session) throw new Error('qBittorrent no configurado o no responde. Revisa Configuración.');
+  const login = await qbLogin();
+  if ('error' in login) throw new Error(login.error);
 
   const url = item.magnet_url || item.torrent_url!;
-  const hash = await qbAddTorrent(session, url);
+  const hash = await qbAddTorrent(login.session, url);
 
   updateDownload(item.id, {
     status: 'downloading',
@@ -262,7 +262,7 @@ async function downloadViaQbittorrent(item: DownloadItem) {
   });
 
   if (hash) {
-    const t = await qbGetTorrent(session, hash);
+    const t = await qbGetTorrent(login.session, hash);
     if (t) applyTorrentState(item, t);
   }
 }

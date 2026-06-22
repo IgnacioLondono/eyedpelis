@@ -39,7 +39,7 @@ export default function SettingsPage() {
   const [newPass, setNewPass] = useState('');
   const [passMsg, setPassMsg] = useState<string | null>(null);
   const [indexerMsg, setIndexerMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  const [testingIndexer, setTestingIndexer] = useState<'prowlarr' | 'jackett' | null>(null);
+  const [testingIndexer, setTestingIndexer] = useState<'prowlarr' | 'jackett' | 'qbittorrent' | null>(null);
 
   useEffect(() => {
     api.getSettings().then(s => setSettings({ ...s, auto_scan: s.auto_scan ?? true })).catch(console.error);
@@ -72,11 +72,15 @@ export default function SettingsPage() {
     }
   }
 
-  async function testIndexer(which: 'prowlarr' | 'jackett') {
+  async function testIndexer(which: 'prowlarr' | 'jackett' | 'qbittorrent') {
     setTestingIndexer(which);
     setIndexerMsg(null);
     try {
-      const result = which === 'prowlarr' ? await api.testProwlarr() : await api.testJackett();
+      const result = which === 'prowlarr'
+        ? await api.testProwlarr()
+        : which === 'jackett'
+          ? await api.testJackett()
+          : await api.testQbittorrent();
       setIndexerMsg({ ok: result.ok, text: result.message });
     } catch (err) {
       setIndexerMsg({ ok: false, text: err instanceof Error ? err.message : 'Error de conexión' });
@@ -238,9 +242,17 @@ export default function SettingsPage() {
                 className="w-full bg-surface border border-surface-border rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-accent"
               />
               <p className="text-xs text-gray-500 mt-1">
-                Misma red Docker: <code className="text-purple-400">http://qbittorrent:8787</code> ·
-                Desde el host: <code className="text-purple-400">http://192.168.50.197:8787</code>
+                Red Docker: <code className="text-purple-400">http://qbittorrent:8080</code> (puerto interno) ·
+                Host: <code className="text-purple-400">http://192.168.50.197:8787</code> solo desde fuera de Docker
               </p>
+              <button
+                type="button"
+                onClick={() => testIndexer('qbittorrent')}
+                disabled={testingIndexer === 'qbittorrent'}
+                className="text-xs text-accent hover:text-accent-glow mt-2"
+              >
+                {testingIndexer === 'qbittorrent' ? 'Probando qBittorrent...' : 'Probar conexión qBittorrent'}
+              </button>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <input
@@ -315,7 +327,7 @@ export default function SettingsPage() {
               </p>
             )}
             <p className="text-xs text-gray-500">
-              Usa la URL interna de Docker (ej. <code className="text-purple-400">http://prowlarr:9696</code>) para que Eyedpelis y qBittorrent puedan descargar los torrents.
+              Guarda la configuración y usa los botones de prueba. Las variables del docker-compose rellenan valores vacíos al arrancar.
             </p>
           </div>
         </section>

@@ -1,6 +1,11 @@
 # Eyedpelis — Portainer con Git (compose path: docker-compose.yml)
-# qBittorrent: usa el contenedor existente del stack "jellyfinn" (no se crea otro).
-# En Eyedpelis → Configuración → qBittorrent URL: http://qbittorrent:8787
+#
+# Servicios externos (stack jellyfinn u otro): deben compartir red jellyfinn_default.
+# IMPORTANTE qBittorrent: dentro de Docker usa el PUERTO INTERNO del contenedor (suele ser 8080),
+# NO el puerto del host (8787). Ejemplo: http://qbittorrent:8080
+#
+# Variables en Portainer → Stack → Environment o archivo .env junto al stack.
+
 services:
   eyedpelis:
     build: .
@@ -19,7 +24,20 @@ services:
       - ADMIN_USER=${ADMIN_USER:-eyedpelis}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-Eyedpelis2026!}
       - AUTH_ENABLED=${AUTH_ENABLED:-true}
-      - CLIENT_URL=${CLIENT_URL:-http://192.168.50.197:3001}
+      - CLIENT_URL=${CLIENT_URL:-https://eyedmovies.eyedcomun.me}
+      # --- qBittorrent (contenedor del stack jellyfinn) ---
+      - QBITTORRENT_URL=${QBITTORRENT_URL:-http://qbittorrent:8080}
+      - QBITTORRENT_USER=${QBITTORRENT_USER:-admin}
+      - QBITTORRENT_PASS=${QBITTORRENT_PASS:-adminadmin}
+      # --- Prowlarr (opcional, mismo stack) ---
+      - PROWLARR_URL=${PROWLARR_URL:-http://prowlarr:9696}
+      - PROWLARR_API_KEY=${PROWLARR_API_KEY:-}
+      # --- Jackett (opcional, alternativa a Prowlarr) ---
+      - JACKETT_URL=${JACKETT_URL:-}
+      - JACKETT_API_KEY=${JACKETT_API_KEY:-}
+      # --- Jellyfin (opcional, metadatos) ---
+      - JELLYFIN_URL=${JELLYFIN_URL:-http://jellyfin:8096}
+      - JELLYFIN_API_KEY=${JELLYFIN_API_KEY:-}
     volumes:
       - /srv/dev-disk-by-uuid-a5b4e34c-5e9b-430c-93ad-0473fe6143d2/data/Videos:/media
       - /srv/dev-disk-by-uuid-a5b4e34c-5e9b-430c-93ad-0473fe6143d2/data/Downloads:/downloads

@@ -99,6 +99,7 @@ export const api = {
   },
   testProwlarr: () => request<{ ok: boolean; message: string }>('/downloads/test/prowlarr'),
   testJackett: () => request<{ ok: boolean; message: string }>('/downloads/test/jackett'),
+  testQbittorrent: () => request<{ ok: boolean; message: string }>('/downloads/test/qbittorrent'),
   addDownload: (data: Record<string, unknown>) =>
     request<import('./types').DownloadItem>('/downloads', {
       method: 'POST',

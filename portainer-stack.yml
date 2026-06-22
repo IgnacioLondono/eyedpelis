@@ -24,7 +24,16 @@ services:
       ADMIN_USER: "eyedpelis"
       ADMIN_PASSWORD: "Eyedpelis2026!"
       AUTH_ENABLED: "true"
-      CLIENT_URL: "http://192.168.50.197:3001"
+      CLIENT_URL: "https://eyedmovies.eyedcomun.me"
+      QBITTORRENT_URL: "http://qbittorrent:8080"
+      QBITTORRENT_USER: "admin"
+      QBITTORRENT_PASS: "adminadmin"
+      PROWLARR_URL: "http://prowlarr:9696"
+      PROWLARR_API_KEY: ""
+      JACKETT_URL: ""
+      JACKETT_API_KEY: ""
+      JELLYFIN_URL: "http://jellyfin:8096"
+      JELLYFIN_API_KEY: ""
     volumes:
       - /srv/dev-disk-by-uuid-a5b4e34c-5e9b-430c-93ad-0473fe6143d2/data/Videos:/media
       - /srv/dev-disk-by-uuid-a5b4e34c-5e9b-430c-93ad-0473fe6143d2/data/Downloads:/downloads

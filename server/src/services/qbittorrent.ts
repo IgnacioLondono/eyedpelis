@@ -28,9 +28,36 @@ export function hashFromMagnetOrUrl(url: string): string | null {
   return match ? match[1].toLowerCase() : null;
 }
 
-export async function qbLogin(): Promise<QbSession | null> {
+function parseCookie(setCookie: string | null): string {
+  if (!setCookie) return '';
+  return setCookie.split(',').map(part => part.split(';')[0].trim()).filter(Boolean).join('; ');
+}
+
+export async function testQbittorrentConnection(): Promise<{ ok: boolean; message: string }> {
   const settings = getSettings();
-  if (!settings.qbittorrent_url) return null;
+  if (!settings.qbittorrent_url) {
+    return { ok: false, message: 'QBITTORRENT_URL no configurado (env o Configuración)' };
+  }
+
+  const login = await qbLogin();
+  if ('error' in login) {
+    return { ok: false, message: login.error };
+  }
+
+  try {
+    const res = await qbFetch(login.session, '/api/v2/app/version');
+    const version = await res.text();
+    return { ok: true, message: `Conectado · qBittorrent v${version.trim()}` };
+  } catch (err) {
+    return { ok: false, message: err instanceof Error ? err.message : 'Error tras login' };
+  }
+}
+
+export async function qbLogin(): Promise<{ session: QbSession } | { error: string }> {
+  const settings = getSettings();
+  if (!settings.qbittorrent_url) {
+    return { error: 'qBittorrent URL vacía. Configura QBITTORRENT_URL en Docker o en Ajustes.' };
+  }
 
   const baseUrl = settings.qbittorrent_url.replace(/\/+$/, '');
   try {
@@ -38,16 +65,37 @@ export async function qbLogin(): Promise<QbSession | null> {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
-        username: settings.qbittorrent_user,
-        password: settings.qbittorrent_pass,
+        username: settings.qbittorrent_user || 'admin',
+        password: settings.qbittorrent_pass || '',
       }),
       signal: AbortSignal.timeout(8000),
     });
-    if (!res.ok) return null;
-    const cookie = res.headers.get('set-cookie') || '';
-    return { cookie, baseUrl };
-  } catch {
-    return null;
+
+    const body = (await res.text()).trim();
+    if (!res.ok) {
+      return { error: `qBittorrent HTTP ${res.status} en ${baseUrl}` };
+    }
+    if (body === 'Fails.') {
+      return { error: 'Usuario o contraseña de qBittorrent incorrectos' };
+    }
+    if (body !== 'Ok.') {
+      return { error: `Respuesta inesperada de qBittorrent: ${body.slice(0, 80)}` };
+    }
+
+    const cookie = parseCookie(res.headers.get('set-cookie'));
+    if (!cookie) {
+      return { error: 'qBittorrent no devolvió cookie de sesión (revisa Web UI → Host header validation)' };
+    }
+
+    return { session: { cookie, baseUrl } };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Error de red';
+    if (msg.includes('fetch failed') || msg.includes('ECONNREFUSED') || msg.includes('ENOTFOUND')) {
+      return {
+        error: `No se puede alcanzar ${baseUrl}. Usa el nombre del contenedor en la red Docker (ej. http://qbittorrent:8080), no el puerto del host (8787).`,
+      };
+    }
+    return { error: msg };
   }
 }
 

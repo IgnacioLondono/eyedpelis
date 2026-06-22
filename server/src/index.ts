@@ -15,7 +15,7 @@ import integrationRoutes from './routes/integrations.js';
 import filesRoutes from './routes/files.js';
 import { ensureMediaDirs, scanLibrary, scheduleBackgroundEnrich } from './services/scanner.js';
 import { startDownloadProcessor } from './services/downloadManager.js';
-import { getSetting } from './db/database.js';
+import { getSetting, applyEnvDefaults } from './db/database.js';
 import { initAuth, authMiddleware } from './services/auth.js';
 
 dotenv.config();
@@ -38,6 +38,7 @@ app.use(cors({
 app.use(express.json());
 
 await initAuth();
+applyEnvDefaults();
 
 app.use('/api/auth', authRoutes);
 app.use(authMiddleware);

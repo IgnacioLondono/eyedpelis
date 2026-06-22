@@ -24,11 +24,15 @@ function defaultData(): DbData {
     tmdb_api_key: process.env.TMDB_API_KEY || '',
     scan_interval: process.env.SCAN_INTERVAL || '*/30 * * * *',
     auto_scan: 'true',
-    qbittorrent_url: '',
-    qbittorrent_user: '',
-    qbittorrent_pass: '',
-    jellyfin_url: '',
-    jellyfin_api_key: '',
+    qbittorrent_url: process.env.QBITTORRENT_URL || '',
+    qbittorrent_user: process.env.QBITTORRENT_USER || 'admin',
+    qbittorrent_pass: process.env.QBITTORRENT_PASS || '',
+    jellyfin_url: process.env.JELLYFIN_URL || '',
+    jellyfin_api_key: process.env.JELLYFIN_API_KEY || '',
+    prowlarr_url: process.env.PROWLARR_URL || '',
+    prowlarr_api_key: process.env.PROWLARR_API_KEY || '',
+    jackett_url: process.env.JACKETT_URL || '',
+    jackett_api_key: process.env.JACKETT_API_KEY || '',
     plex_url: '',
     plex_token: '',
     auth_enabled: process.env.AUTH_ENABLED ?? 'true',
@@ -73,6 +77,26 @@ export function setSetting(key: string, value: string) {
 
 export function getAllSettings(): Record<string, string> {
   return { ...getDb().settings };
+}
+
+/** Sincroniza integraciones desde variables de entorno (Docker / Portainer). El env tiene prioridad. */
+export function applyEnvDefaults() {
+  const fromEnv: Record<string, string | undefined> = {
+    qbittorrent_url: process.env.QBITTORRENT_URL,
+    qbittorrent_user: process.env.QBITTORRENT_USER,
+    qbittorrent_pass: process.env.QBITTORRENT_PASS,
+    prowlarr_url: process.env.PROWLARR_URL,
+    prowlarr_api_key: process.env.PROWLARR_API_KEY,
+    jackett_url: process.env.JACKETT_URL,
+    jackett_api_key: process.env.JACKETT_API_KEY,
+    jellyfin_url: process.env.JELLYFIN_URL,
+    jellyfin_api_key: process.env.JELLYFIN_API_KEY,
+    tmdb_api_key: process.env.TMDB_API_KEY,
+  };
+
+  for (const [key, value] of Object.entries(fromEnv)) {
+    if (value) setSetting(key, value);
+  }
 }
 
 export function insertMedia(item: Omit<MediaItem, 'id' | 'created_at' | 'updated_at'>): MediaItem {

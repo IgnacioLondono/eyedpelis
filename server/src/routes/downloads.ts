@@ -4,12 +4,17 @@ import {
 } from '../services/downloadManager.js';
 import { scanLibrary, scheduleBackgroundEnrich } from '../services/scanner.js';
 import { getSearchCapabilities, pickBestTorrent, searchTorrents, testJackettConnection, testProwlarrConnection } from '../services/torrentSearch.js';
+import { testQbittorrentConnection } from '../services/qbittorrent.js';
 import type { MediaType } from '../types.js';
 
 const router = Router();
 
 router.get('/capabilities', (_req, res) => {
   res.json(getSearchCapabilities());
+});
+
+router.get('/test/qbittorrent', async (_req, res) => {
+  res.json(await testQbittorrentConnection());
 });
 
 router.get('/test/prowlarr', async (_req, res) => {
