@@ -1,5 +1,6 @@
 import { Routes, Route } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
+import { NoticeProvider } from './context/NoticeContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import Layout from './components/Layout';
 import Home from './pages/Home';
@@ -16,6 +17,7 @@ import Player from './pages/Player';
 export default function App() {
   return (
     <AuthProvider>
+      <NoticeProvider>
       <Routes>
         <Route element={<ProtectedRoute />}>
           <Route element={<Layout />}>
@@ -32,6 +34,7 @@ export default function App() {
           <Route path="/watch/:id" element={<Player />} />
         </Route>
       </Routes>
+      </NoticeProvider>
     </AuthProvider>
   );
 }

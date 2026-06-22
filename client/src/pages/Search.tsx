@@ -2,9 +2,11 @@ import { useState } from 'react';
 import { Search as SearchIcon, Download, Film, Tv, Link2, Info, RefreshCw, Users, HardDrive, Zap } from 'lucide-react';
 import { api, posterUrl, formatBytes } from '../api';
 import Modal from '../components/Modal';
+import { errorMessage, useNotice } from '../context/NoticeContext';
 import type { SearchResult, TorrentResult } from '../types';
 
 export default function Search() {
+  const { showError, showSuccess } = useNotice();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
@@ -27,7 +29,7 @@ export default function Search() {
       const data = await api.search(query);
       setResults(data);
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Error de búsqueda');
+      showError(errorMessage(err, 'Error de búsqueda'));
     } finally {
       setLoading(false);
     }
@@ -96,7 +98,7 @@ export default function Search() {
         direct_url: directUrl || undefined,
       });
       closeModal();
-      alert(`"${showModal.title}" añadido a la cola. Cuando termine te pediremos en qué carpeta guardarlo.`);
+      showSuccess(`"${showModal.title}" añadido a la cola.\nCuando termine te pediremos en qué carpeta guardarlo.`, 'Añadido a descargas');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error al descargar');
     } finally {

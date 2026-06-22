@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { api, formatBytes } from '../api';
 import Modal from '../components/Modal';
+import { errorMessage, useNotice } from '../context/NoticeContext';
 import type { LibraryStats } from '../types';
 
 interface FileEntry {
@@ -57,6 +58,7 @@ function formatModified(iso: string) {
 }
 
 export default function FileManager() {
+  const { showError } = useNotice();
   const [info, setInfo] = useState<FilesInfo | null>(null);
   const [currentPath, setCurrentPath] = useState('');
   const [entries, setEntries] = useState<FileEntry[]>([]);
@@ -134,7 +136,7 @@ export default function FileManager() {
       showMsg('Carpeta creada');
       loadDir(currentPath);
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Error');
+      showError(errorMessage(err));
     } finally {
       setMkdirLoading(false);
     }
@@ -150,7 +152,7 @@ export default function FileManager() {
       showMsg(`Renombrado — biblioteca: +${res.scan.added} / -${res.scan.removed}`);
       loadDir(currentPath);
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Error');
+      showError(errorMessage(err));
     } finally {
       setRenameLoading(false);
     }
@@ -165,7 +167,7 @@ export default function FileManager() {
       showMsg(`Eliminado — biblioteca: -${res.scan.removed} entradas`);
       loadDir(currentPath);
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Error');
+      showError(errorMessage(err));
     } finally {
       setDeleteLoading(false);
     }
@@ -178,7 +180,7 @@ export default function FileManager() {
       showMsg(`Escaneo: ${res.total} archivos (+${res.added}, -${res.removed})`);
       api.getStats().then(setStats).catch(console.error);
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Error');
+      showError(errorMessage(err));
     } finally {
       setScanning(false);
     }
@@ -198,7 +200,7 @@ export default function FileManager() {
       loadDir(currentPath);
       api.getStats().then(setStats).catch(console.error);
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Error al subir');
+      showError(errorMessage(err, 'Error al subir'));
     } finally {
       setUploading(false);
       setUploadProgress(0);

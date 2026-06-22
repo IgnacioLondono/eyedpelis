@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { api, posterUrl, formatBytes, formatSpeed, formatEta } from '../api';
 import Modal from '../components/Modal';
+import { useNotice } from '../context/NoticeContext';
 import type { DownloadItem } from '../types';
 
 const statusConfig: Record<string, { icon: typeof Clock; color: string; label: string; bar?: string }> = {
@@ -21,6 +22,7 @@ function isActive(d: DownloadItem) {
 }
 
 export default function Downloads() {
+  const { showSuccess } = useNotice();
   const [downloads, setDownloads] = useState<DownloadItem[]>([]);
   const [folderModal, setFolderModal] = useState<DownloadItem | null>(null);
   const [folder, setFolder] = useState<'movies' | 'series'>('movies');
@@ -76,7 +78,7 @@ export default function Downloads() {
       const result = await api.finalizeDownload(folderModal.id, folder, subfolder || undefined);
       setFolderModal(null);
       load();
-      alert(`Archivo movido correctamente. Biblioteca actualizada (+${result.scan.added} nuevos).`);
+      showSuccess(`Archivo movido correctamente.\nBiblioteca actualizada (+${result.scan.added} nuevos).`);
     } catch (err) {
       setFinalizeError(err instanceof Error ? err.message : 'Error al mover');
     } finally {

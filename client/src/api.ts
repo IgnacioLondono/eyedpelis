@@ -19,7 +19,12 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
   };
   if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
 
-  const res = await fetch(`${API}${url}`, { ...options, headers });
+  let res: Response;
+  try {
+    res = await fetch(`${API}${url}`, { ...options, headers });
+  } catch {
+    throw new Error('No se pudo conectar con el servidor. Comprueba que Eyedpelis esté en marcha.');
+  }
   if (res.status === 401) {
     if (authToken) {
       setAuthToken(null);

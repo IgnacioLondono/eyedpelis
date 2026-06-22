@@ -1,4 +1,6 @@
-# Eyedpelis + qBittorrent — para Portainer con Git (compose path: docker-compose.yml)
+# Eyedpelis — Portainer con Git (compose path: docker-compose.yml)
+# qBittorrent: usa el contenedor existente del stack "jellyfinn" (no se crea otro).
+# En Eyedpelis → Configuración → qBittorrent URL: http://qbittorrent:8787
 services:
   eyedpelis:
     build: .
@@ -22,30 +24,14 @@ services:
       - /srv/dev-disk-by-uuid-a5b4e34c-5e9b-430c-93ad-0473fe6143d2/data/Videos:/media
       - /srv/dev-disk-by-uuid-a5b4e34c-5e9b-430c-93ad-0473fe6143d2/data/Downloads:/downloads
       - ./data:/app/server/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - eyedpelis-net
-    depends_on:
-      - qbittorrent
-
-  qbittorrent:
-    image: lscr.io/linuxserver/qbittorrent:latest
-    container_name: qbittorrent
-    restart: unless-stopped
-    environment:
-      - PUID=1000
-      - PGID=1000
-      - TZ=Europe/Madrid
-      - WEBUI_PORT=8080
-    volumes:
-      - ./qbittorrent-config:/config
-      - /srv/dev-disk-by-uuid-a5b4e34c-5e9b-430c-93ad-0473fe6143d2/data/Downloads:/downloads
-    ports:
-      - "8080:8080"
-      - "6881:6881"
-      - "6881:6881/udp"
-    networks:
-      - eyedpelis-net
+      - jellyfinn_default
 
 networks:
   eyedpelis-net:
     driver: bridge
+  jellyfinn_default:
+    external: true

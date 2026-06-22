@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Save, RefreshCw, FolderOpen, Key, Server, Shield, Link2, Lock, CheckCircle, XCircle, Info } from 'lucide-react';
 import { api } from '../api';
+import { errorMessage, useNotice } from '../context/NoticeContext';
 import type { Settings } from '../types';
 
 export default function SettingsPage() {
+  const { showError } = useNotice();
   const [settings, setSettings] = useState<Settings>({
     media_path: '',
     movies_path: 'movies',
@@ -46,7 +48,7 @@ export default function SettingsPage() {
       setMessage('Configuración guardada');
       setTimeout(() => setMessage(null), 3000);
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Error al guardar');
+      showError(errorMessage(err, 'Error al guardar'));
     } finally {
       setSaving(false);
     }
@@ -204,7 +206,8 @@ export default function SettingsPage() {
             <h2 className="text-lg font-semibold">Descargas (qBittorrent + indexadores)</h2>
           </div>
           <p className="text-sm text-gray-400 mb-4">
-            qBittorrent gestiona los torrents. Prowlarr o Jackett amplían la búsqueda automática a cientos de indexadores.
+            qBittorrent gestiona los torrents. Si ya tienes uno en otro stack (p. ej. jellyfinn), usa su URL interna.
+            Prowlarr o Jackett amplían la búsqueda automática a cientos de indexadores.
           </p>
           <div className="space-y-4">
             <div>
@@ -213,9 +216,13 @@ export default function SettingsPage() {
                 type="text"
                 value={settings.qbittorrent_url}
                 onChange={e => update('qbittorrent_url', e.target.value)}
-                placeholder="http://localhost:8080"
+                placeholder="http://qbittorrent:8787"
                 className="w-full bg-surface border border-surface-border rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-accent"
               />
+              <p className="text-xs text-gray-500 mt-1">
+                Misma red Docker: <code className="text-purple-400">http://qbittorrent:8787</code> ·
+                Desde el host: <code className="text-purple-400">http://192.168.50.197:8787</code>
+              </p>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <input
