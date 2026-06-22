@@ -3,10 +3,13 @@
 #
 # Servicios incluidos:
 #   eyedpelis     → https://eyedmovies.eyedcomun.me (puerto 3001)
-#   qbittorrent   → Web UI puerto 8787
-#   prowlarr      → puerto 9696
-#   jackett       → puerto 9117
-#   flaresolverr  → puerto 8191 (para indexadores con Cloudflare)
+#   qbittorrent   → Web UI puerto host ${QBIT_HOST_PORT:-18787}
+#   prowlarr      → Web UI puerto host ${PROWLARR_HOST_PORT:-19696}
+#   jackett       → Web UI puerto host ${JACKETT_HOST_PORT:-19117}
+#   flaresolverr  → puerto host ${FLARESOLVERR_HOST_PORT:-18191}
+#
+# Puertos internos (entre contenedores) no cambian: prowlarr:9696, jackett:9117, etc.
+# Los puertos HOST usan 1xxxx para no chocar con Prowlarr/Jackett del stack jellyfinn.
 #
 # Tras el primer arranque:
 #   1. Prowlarr → Settings → General → copia API Key → PROWLARR_API_KEY en Portainer
@@ -65,9 +68,9 @@ services:
       - WEBUI_PORT=8080
       - TORRENTING_PORT=6881
     ports:
-      - "8787:8080"
-      - "6881:6881"
-      - "6881:6881/udp"
+      - "${QBIT_HOST_PORT:-18787}:8080"
+      - "${QBIT_TORRENT_PORT:-16881}:6881"
+      - "${QBIT_TORRENT_PORT:-16881}:6881/udp"
     volumes:
       - ${DOWNLOADS_PATH:-/srv/dev-disk-by-uuid-a5b4e34c-5e9b-430c-93ad-0473fe6143d2/data/Downloads}:/downloads
       - ./data/qbittorrent:/config
@@ -83,7 +86,7 @@ services:
       - PGID=${PGID:-1000}
       - TZ=${TZ:-Europe/Madrid}
     ports:
-      - "9696:9696"
+      - "${PROWLARR_HOST_PORT:-19696}:9696"
     volumes:
       - ./data/prowlarr:/config
     networks:
@@ -98,7 +101,7 @@ services:
       - PGID=${PGID:-1000}
       - TZ=${TZ:-Europe/Madrid}
     ports:
-      - "9117:9117"
+      - "${JACKETT_HOST_PORT:-19117}:9117"
     volumes:
       - ./data/jackett:/config
     networks:
@@ -112,7 +115,7 @@ services:
       - LOG_LEVEL=info
       - TZ=${TZ:-Europe/Madrid}
     ports:
-      - "8191:8191"
+      - "${FLARESOLVERR_HOST_PORT:-18191}:8191"
     networks:
       - eyedpelis-net
 

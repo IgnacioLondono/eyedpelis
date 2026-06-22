@@ -49,9 +49,9 @@ services:
       WEBUI_PORT: "8080"
       TORRENTING_PORT: "6881"
     ports:
-      - "8787:8080"
-      - "6881:6881"
-      - "6881:6881/udp"
+      - "18787:8080"
+      - "16881:6881"
+      - "16881:6881/udp"
     volumes:
       - /srv/dev-disk-by-uuid-a5b4e34c-5e9b-430c-93ad-0473fe6143d2/data/Downloads:/downloads
       - /opt/eyedpelis/data/qbittorrent:/config
@@ -67,7 +67,7 @@ services:
       PGID: "1000"
       TZ: "Europe/Madrid"
     ports:
-      - "9696:9696"
+      - "19696:9696"
     volumes:
       - /opt/eyedpelis/data/prowlarr:/config
     networks:
@@ -82,7 +82,7 @@ services:
       PGID: "1000"
       TZ: "Europe/Madrid"
     ports:
-      - "9117:9117"
+      - "19117:9117"
     volumes:
       - /opt/eyedpelis/data/jackett:/config
     networks:
@@ -96,7 +96,7 @@ services:
       LOG_LEVEL: "info"
       TZ: "Europe/Madrid"
     ports:
-      - "8191:8191"
+      - "18191:8191"
     networks:
       - eyedpelis-net
 
