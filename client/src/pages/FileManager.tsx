@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { api, formatBytes } from '../api';
 import Modal from '../components/Modal';
+import ScanProgressModal, { useScanProgress } from '../components/ScanProgressModal';
 import { errorMessage, useNotice } from '../context/NoticeContext';
 import type { LibraryStats } from '../types';
 
@@ -59,6 +60,7 @@ function formatModified(iso: string) {
 
 export default function FileManager() {
   const { showError } = useNotice();
+  const scanProgress = useScanProgress(() => api.getFilesScanStatus());
   const [info, setInfo] = useState<FilesInfo | null>(null);
   const [currentPath, setCurrentPath] = useState('');
   const [entries, setEntries] = useState<FileEntry[]>([]);
@@ -175,15 +177,17 @@ export default function FileManager() {
 
   async function handleScan() {
     setScanning(true);
-    try {
-      const res = await api.scanFilesLibrary();
-      showMsg(`Escaneo: ${res.total} archivos (+${res.added}, -${res.removed})`);
+    const final = await scanProgress.start(() => api.scanFilesLibrary());
+    setScanning(false);
+    if (final?.result) {
       api.getStats().then(setStats).catch(console.error);
-    } catch (err) {
-      showError(errorMessage(err));
-    } finally {
-      setScanning(false);
+    } else if (final?.error) {
+      showError(final.error);
     }
+  }
+
+  function handleScanClose() {
+    scanProgress.close();
   }
 
   async function handleUploadFiles(fileList: FileList | File[]) {
@@ -561,6 +565,12 @@ export default function FileManager() {
           </button>
         </div>
       </Modal>
+
+      <ScanProgressModal
+        open={scanProgress.open}
+        status={scanProgress.status}
+        onClose={handleScanClose}
+      />
     </div>
   );
 }

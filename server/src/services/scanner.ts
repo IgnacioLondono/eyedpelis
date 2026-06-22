@@ -1,13 +1,16 @@
 import fs from 'fs';
 import path from 'path';
 import {
-  getDb, persist, insertMedia, updateMedia, deleteMediaByPath,
+  persist, insertMedia, updateMedia, deleteMediaByPath,
   findMedia, getMediaByPath,
 } from '../db/database.js';
 import { getMoviesPath, getSeriesPath, isMediaReadOnly } from '../config.js';
 import { enrichFromTmdb, tmdbMetadataWithGenres } from './tmdb.js';
 import { findAllSubtitles } from './subtitles.js';
 import { parseWithFolderContext } from './filenameParser.js';
+import {
+  getEnrichPromise, getScanStatus, isScanRunning, setEnrichPromise, setScanProgress,
+} from './scanState.js';
 import type { MediaType, MediaItem } from '../types.js';
 
 const VIDEO_EXTENSIONS = new Set(['.mp4', '.mkv', '.avi', '.mov', '.wmv', '.webm', '.m4v', '.ts']);
@@ -21,6 +24,11 @@ interface ParsedFile {
   year?: number;
   season?: number;
   episode?: number;
+}
+
+export interface ScanOptions {
+  enrich?: boolean;
+  onProgress?: (current: number, total: number, label: string) => void;
 }
 
 function walkDir(dir: string, type: MediaType, results: ParsedFile[] = [], parentFolder: string | null = null): ParsedFile[] {
@@ -47,7 +55,9 @@ function walkDir(dir: string, type: MediaType, results: ParsedFile[] = [], paren
   return results;
 }
 
-export async function enrichMissingMetadata(): Promise<number> {
+export async function enrichMissingMetadata(
+  onProgress?: (current: number, total: number, label: string) => void,
+): Promise<number> {
   const targets = findMedia(m => {
     if (m.poster_path && m.tmdb_id && m.genres) return false;
     if (m.type === 'movie') return !!m.file_path;
@@ -55,7 +65,9 @@ export async function enrichMissingMetadata(): Promise<number> {
   });
 
   let enriched = 0;
-  for (const item of targets) {
+  for (let i = 0; i < targets.length; i++) {
+    const item = targets[i];
+    onProgress?.(i + 1, targets.length, item.title);
     const year = item.release_date ? parseInt(item.release_date.slice(0, 4)) : undefined;
     const { title, year: parsedYear } = cleanTitleForSearch(item.title, year);
     const tmdb = await enrichFromTmdb(title, item.type, parsedYear);
@@ -64,6 +76,7 @@ export async function enrichMissingMetadata(): Promise<number> {
       enriched++;
     }
   }
+  persist();
   return enriched;
 }
 
@@ -102,6 +115,20 @@ async function enrichExistingItem(file: ParsedFile, existing: MediaItem) {
   return updates;
 }
 
+function basicFileMeta(file: ParsedFile) {
+  return {
+    tmdb_id: null as number | null,
+    title: file.title,
+    original_title: null as string | null,
+    overview: null as string | null,
+    poster_path: null as string | null,
+    backdrop_path: null as string | null,
+    release_date: file.year ? `${file.year}-01-01` : null,
+    vote_average: null as number | null,
+    genres: null as string | null,
+  };
+}
+
 export interface ScanResult {
   added: number;
   updated: number;
@@ -109,7 +136,10 @@ export interface ScanResult {
   total: number;
 }
 
-export async function scanLibrary(): Promise<ScanResult> {
+export async function scanLibrary(options?: ScanOptions): Promise<ScanResult> {
+  const enrich = options?.enrich ?? false;
+
+  setScanProgress({ message: 'Buscando archivos en disco...' });
   const moviesPath = getMoviesPath();
   const seriesPath = getSeriesPath();
 
@@ -126,19 +156,27 @@ export async function scanLibrary(): Promise<ScanResult> {
 
   const seriesCache = new Map<string, number>();
 
-  for (const file of files) {
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+    options?.onProgress?.(i + 1, files.length, file.fileName);
+    setScanProgress({ current: i + 1, total: files.length, message: file.fileName });
+
     const subs = await findAllSubtitles(file.filePath);
     const existingItem = getMediaByPath(file.filePath);
 
     if (existingItem) {
-      const updates = await enrichExistingItem(file, existingItem);
+      const updates = enrich
+        ? await enrichExistingItem(file, existingItem)
+        : { file_size: file.fileSize, subtitles: subs };
       updateMedia(existingItem.id, updates);
       updated++;
       continue;
     }
 
-    const tmdb = await fetchTmdbForFile(file);
-    const meta = await applyTmdbToItem(file, tmdb);
+    const meta = enrich
+      ? await applyTmdbToItem(file, await fetchTmdbForFile(file))
+      : basicFileMeta(file);
+
     let seriesId: number | null = null;
 
     if (file.type === 'series' && file.season !== undefined) {
@@ -146,18 +184,19 @@ export async function scanLibrary(): Promise<ScanResult> {
       if (!seriesCache.has(seriesKey)) {
         const parent = findMedia(m =>
           m.type === 'series' && !m.file_path &&
-          m.title.toLowerCase() === file.title.toLowerCase()
+          m.title.toLowerCase() === file.title.toLowerCase(),
         )[0];
 
         if (parent) {
           seriesCache.set(seriesKey, parent.id);
         } else {
-          const { title, year } = cleanTitleForSearch(file.title, file.year);
-          const seriesTmdb = await enrichFromTmdb(title, 'series', year);
-          const seriesMeta = await applyTmdbToItem(
-            { ...file, type: 'series', season: undefined, episode: undefined },
-            seriesTmdb,
-          );
+          const seriesMeta = enrich
+            ? await applyTmdbToItem(
+              { ...file, type: 'series', season: undefined, episode: undefined },
+              await fetchTmdbForFile({ ...file, type: 'series' }),
+            )
+            : basicFileMeta(file);
+
           const created = insertMedia({
             tmdb_id: seriesMeta.tmdb_id ?? null,
             type: 'series',
@@ -215,10 +254,115 @@ export async function scanLibrary(): Promise<ScanResult> {
     }
   }
 
-  await enrichMissingMetadata();
+  if (enrich) {
+    setScanProgress({ phase: 'enriching', message: 'Actualizando metadatos TMDB...' });
+    await enrichMissingMetadata((current, total, label) => {
+      setScanProgress({ current, total, message: label });
+    });
+  }
 
   persist();
   return { added, updated, removed, total: files.length };
+}
+
+let enrichTimer: ReturnType<typeof setTimeout> | null = null;
+
+async function runBackgroundEnrich() {
+  setScanProgress({
+    running: true,
+    phase: 'enriching',
+    current: 0,
+    total: 0,
+    message: 'Actualizando metadatos TMDB en segundo plano...',
+  });
+  try {
+    const enriched = await enrichMissingMetadata((current, total, label) => {
+      setScanProgress({ current, total, message: label });
+    });
+    setScanProgress({
+      running: false,
+      phase: 'done',
+      enrichCount: enriched,
+      message: enriched > 0 ? `Metadatos TMDB: ${enriched} títulos` : 'Metadatos al día',
+    });
+    return enriched;
+  } catch (err) {
+    setScanProgress({
+      running: false,
+      phase: 'done',
+      error: err instanceof Error ? err.message : 'Error al enriquecer',
+    });
+    return 0;
+  } finally {
+    setEnrichPromise(null);
+  }
+}
+
+export function scheduleBackgroundEnrich() {
+  if (getEnrichPromise()) return;
+  if (enrichTimer) clearTimeout(enrichTimer);
+  enrichTimer = setTimeout(() => {
+    enrichTimer = null;
+    if (!getEnrichPromise()) {
+      const p = runBackgroundEnrich();
+      setEnrichPromise(p);
+    }
+  }, 1500);
+}
+
+export async function runScanJob(): Promise<ScanResult> {
+  if (isScanRunning()) {
+    const status = getScanStatus();
+    if (status.result) return status.result;
+    throw new Error('Ya hay un escaneo en curso');
+  }
+
+  setScanProgress({
+    running: true,
+    phase: 'indexing',
+    current: 0,
+    total: 0,
+    message: 'Iniciando escaneo...',
+    result: null,
+    error: null,
+    enrichCount: 0,
+  });
+
+  try {
+    const result = await scanLibrary({
+      enrich: false,
+      onProgress: (current, total, label) => {
+        setScanProgress({ phase: 'indexing', current, total, message: label });
+      },
+    });
+
+    setScanProgress({
+      phase: 'enriching',
+      running: true,
+      result,
+      current: 0,
+      total: 0,
+      message: 'Actualizando metadatos TMDB...',
+    });
+
+    const enriched = await enrichMissingMetadata((current, total, label) => {
+      setScanProgress({ current, total, message: label });
+    });
+
+    setScanProgress({
+      running: false,
+      phase: 'done',
+      result,
+      enrichCount: enriched,
+      message: `Listo: ${result.total} archivos (+${result.added}, -${result.removed})`,
+    });
+
+    return result;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Error al escanear';
+    setScanProgress({ running: false, phase: 'idle', error: msg });
+    throw err;
+  }
 }
 
 export function ensureMediaDirs() {

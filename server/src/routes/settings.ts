@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { setSetting } from '../db/database.js';
-import { scanLibrary, enrichMissingMetadata } from '../services/scanner.js';
+import { scanLibrary, enrichMissingMetadata, runScanJob, scheduleBackgroundEnrich } from '../services/scanner.js';
+import { getScanStatus, isScanRunning } from '../services/scanState.js';
 import { getSettings } from '../config.js';
 
 const router = Router();
@@ -33,11 +34,18 @@ router.put('/', (req, res) => {
 
 router.post('/scan', async (_req, res) => {
   try {
-    const result = await scanLibrary();
-    res.json(result);
+    if (isScanRunning()) {
+      return res.json({ started: false, ...getScanStatus() });
+    }
+    runScanJob().catch(console.error);
+    res.json({ started: true, ...getScanStatus() });
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : 'Error al escanear' });
   }
+});
+
+router.get('/scan/status', (_req, res) => {
+  res.json(getScanStatus());
 });
 
 router.post('/re-enrich', async (_req, res) => {

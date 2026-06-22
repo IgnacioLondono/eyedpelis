@@ -16,7 +16,8 @@ import {
   sanitizeUploadFilename,
   UPLOAD_ALLOWED_EXT,
 } from '../services/filesystem.js';
-import { scanLibrary } from '../services/scanner.js';
+import { scanLibrary, scheduleBackgroundEnrich, runScanJob } from '../services/scanner.js';
+import { getScanStatus, isScanRunning } from '../services/scanState.js';
 
 const router = Router();
 
@@ -90,7 +91,8 @@ router.post('/upload', (req, res) => {
 
     try {
       const entries = uploaded.map(f => entryFromAbsolute(f.path));
-      const scan = await scanLibrary();
+      const scan = await scanLibrary({ enrich: false });
+      scheduleBackgroundEnrich();
       res.status(201).json({ entries, scan });
     } catch (e) {
       res.status(500).json({ error: e instanceof Error ? e.message : 'Error post-subida' });
@@ -114,7 +116,8 @@ router.put('/rename', async (req, res) => {
     const { path: rel, newName } = req.body as { path?: string; newName?: string };
     if (!rel || !newName?.trim()) return res.status(400).json({ error: 'Ruta y nombre requeridos' });
     const entry = renameEntry(rel, newName);
-    const scan = await scanLibrary();
+    const scan = await scanLibrary({ enrich: false });
+    scheduleBackgroundEnrich();
     res.json({ entry, scan });
   } catch (err) {
     res.status(400).json({ error: err instanceof Error ? err.message : 'Error al renombrar' });
@@ -127,7 +130,8 @@ router.delete('/', async (req, res) => {
     if (!rel) return res.status(400).json({ error: 'Ruta requerida' });
 
     deleteEntry(rel);
-    const scan = await scanLibrary();
+    const scan = await scanLibrary({ enrich: false });
+    scheduleBackgroundEnrich();
 
     res.json({ ok: true, scan });
   } catch (err) {
@@ -137,11 +141,18 @@ router.delete('/', async (req, res) => {
 
 router.post('/scan', async (_req, res) => {
   try {
-    const scan = await scanLibrary();
-    res.json(scan);
+    if (isScanRunning()) {
+      return res.json({ started: false, ...getScanStatus() });
+    }
+    runScanJob().catch(console.error);
+    res.json({ started: true, ...getScanStatus() });
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : 'Error al escanear' });
   }
+});
+
+router.get('/scan/status', (_req, res) => {
+  res.json(getScanStatus());
 });
 
 export default router;

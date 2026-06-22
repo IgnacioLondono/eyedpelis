@@ -2,10 +2,12 @@ import { useEffect, useState } from 'react';
 import { Save, RefreshCw, FolderOpen, Key, Server, Shield, Link2, Lock, CheckCircle, XCircle, Info } from 'lucide-react';
 import { api } from '../api';
 import { errorMessage, useNotice } from '../context/NoticeContext';
+import ScanProgressModal, { useScanProgress } from '../components/ScanProgressModal';
 import type { Settings } from '../types';
 
 export default function SettingsPage() {
   const { showError } = useNotice();
+  const scanProgress = useScanProgress(() => api.getSettingsScanStatus());
   const [settings, setSettings] = useState<Settings>({
     media_path: '',
     movies_path: 'movies',
@@ -57,13 +59,12 @@ export default function SettingsPage() {
   async function handleScan() {
     setScanning(true);
     setScanResult(null);
-    try {
-      const result = await api.scanLibrary();
-      setScanResult(`Escaneo completado: ${result.total} archivos (+${result.added} nuevos, ${result.updated} actualizados, -${result.removed} eliminados)`);
-    } catch (err) {
-      setScanResult(err instanceof Error ? err.message : 'Error al escanear');
-    } finally {
-      setScanning(false);
+    const final = await scanProgress.start(() => api.scanLibrary());
+    setScanning(false);
+    if (final?.error) {
+      setScanResult(final.error);
+    } else if (final?.result) {
+      setScanResult(`Escaneo completado: ${final.result.total} archivos (+${final.result.added} nuevos, ${final.result.updated} actualizados, -${final.result.removed} eliminados)`);
     }
   }
 
@@ -394,6 +395,12 @@ export default function SettingsPage() {
           {saving ? 'Guardando...' : 'Guardar configuración'}
         </button>
       </form>
+
+      <ScanProgressModal
+        open={scanProgress.open}
+        status={scanProgress.status}
+        onClose={() => scanProgress.close()}
+      />
     </div>
   );
 }

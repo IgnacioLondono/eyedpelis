@@ -97,3 +97,22 @@ export interface Settings {
   jackett_api_key: string;
   auth_enabled: boolean;
 }
+
+export interface ScanResult {
+  added: number;
+  updated: number;
+  removed: number;
+  total: number;
+}
+
+export interface ScanStatus {
+  running: boolean;
+  phase: 'idle' | 'indexing' | 'enriching' | 'done';
+  current: number;
+  total: number;
+  message: string;
+  result: ScanResult | null;
+  enrichCount: number;
+  error: string | null;
+  started?: boolean;
+}

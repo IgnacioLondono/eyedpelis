@@ -2,7 +2,7 @@ import { Router } from 'express';
 import {
   addToQueue, getAllDownloads, deleteDownload, updateDownload, finalizeDownload, syncActiveDownloads,
 } from '../services/downloadManager.js';
-import { scanLibrary } from '../services/scanner.js';
+import { scanLibrary, scheduleBackgroundEnrich } from '../services/scanner.js';
 import { getSearchCapabilities, pickBestTorrent, searchTorrents } from '../services/torrentSearch.js';
 import type { MediaType } from '../types.js';
 
@@ -103,7 +103,8 @@ router.post('/:id/finalize', async (req, res) => {
       return res.status(400).json({ error: 'folder debe ser "movies" o "series"' });
     }
     const destPath = await finalizeDownload(id, folder, subfolder);
-    const scan = await scanLibrary();
+    const scan = await scanLibrary({ enrich: false });
+    scheduleBackgroundEnrich();
     res.json({ ok: true, path: destPath, scan });
   } catch (err) {
     res.status(400).json({ error: err instanceof Error ? err.message : 'Error al mover archivo' });

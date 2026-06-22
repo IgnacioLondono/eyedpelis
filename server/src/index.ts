@@ -13,7 +13,7 @@ import streamRoutes from './routes/stream.js';
 import authRoutes from './routes/auth.js';
 import integrationRoutes from './routes/integrations.js';
 import filesRoutes from './routes/files.js';
-import { ensureMediaDirs, scanLibrary } from './services/scanner.js';
+import { ensureMediaDirs, scanLibrary, scheduleBackgroundEnrich } from './services/scanner.js';
 import { startDownloadProcessor } from './services/downloadManager.js';
 import { getSetting } from './db/database.js';
 import { initAuth, authMiddleware } from './services/auth.js';
@@ -71,7 +71,12 @@ startDownloadProcessor();
 const scanInterval = getSetting('scan_interval') || '*/30 * * * *';
 if (cron.validate(scanInterval)) {
   cron.schedule(scanInterval, () => {
-    scanLibrary().then(r => console.log(`Escaneo automático: +${r.added} ~${r.updated} -${r.removed}`)).catch(console.error);
+    scanLibrary({ enrich: false })
+      .then(r => {
+        console.log(`Escaneo automático: +${r.added} ~${r.updated} -${r.removed}`);
+        scheduleBackgroundEnrich();
+      })
+      .catch(console.error);
   });
 }
 
@@ -80,5 +85,10 @@ app.listen(PORT, () => {
   console.log(`👁️ Eyedpelis API en http://localhost:${PORT}${ro}`);
   console.log(`📁 Películas: ${process.env.MEDIA_PATH || './media'}/${process.env.MOVIES_PATH || 'Peliculas'}`);
   console.log(`📁 Series: ${process.env.MEDIA_PATH || './media'}/${process.env.SERIES_PATH || 'Series'}`);
-  scanLibrary().then(r => console.log(`Biblioteca inicial: ${r.total} archivos (${r.added} nuevos)`)).catch(console.error);
+  scanLibrary({ enrich: false })
+    .then(r => {
+      console.log(`Biblioteca inicial: ${r.total} archivos (${r.added} nuevos)`);
+      scheduleBackgroundEnrich();
+    })
+    .catch(console.error);
 });
