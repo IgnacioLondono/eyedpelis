@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api, posterUrl } from '../api';
+import { usePlatform } from '../context/PlatformContext';
 import VideoPlayer from '../components/VideoPlayer';
 import type { MediaItem, SubtitleTrack } from '../types';
 
@@ -17,6 +18,8 @@ export default function Player() {
     index: number; codec: string; codecLabel: string; language: string;
   }>>([]);
   const [ready, setReady] = useState(false);
+
+  const { isAndroidMobile, isAndroidTv } = usePlatform();
 
   useEffect(() => {
     if (!id) return;
@@ -61,8 +64,8 @@ export default function Player() {
 
   if (!media || !ready) {
     return (
-      <div className="flex items-center justify-center h-screen bg-black">
-        <div className="animate-pulse text-gray-400">Cargando reproductor...</div>
+      <div className={`flex items-center justify-center bg-black ${isAndroidMobile || isAndroidTv ? 'h-[100dvh]' : 'h-screen'}`}>
+        <div className={`animate-pulse text-gray-400 ${isAndroidTv ? 'text-lg' : ''}`}>Cargando reproductor…</div>
       </div>
     );
   }

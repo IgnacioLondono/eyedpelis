@@ -57,7 +57,8 @@ https://eyedmovies.eyedcomun.me/?tv=1
 | Servidor remoto | `server.url` en `capacitor.config.ts` — no empaqueta el backend |
 | Móvil | Barra inferior, filas horizontales, hero compacto, safe areas |
 | Android TV | Sidebar, filas horizontales con foco D-pad, hero grande |
-| Reproductor | Play/Pause del mando, seek ±10s, pantalla completa en TV |
+| Reproductor móvil | Controles táctiles grandes, barra de progreso gruesa, seek al deslizar |
+| Reproductor TV | Pantalla completa auto, foco D-pad, ±30s, menús modales grandes |
 | Atrás | Botón del sistema → historial WebView o salir |
 
 ## Errores frecuentes

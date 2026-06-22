@@ -5,7 +5,10 @@ import {
 } from 'lucide-react';
 import { findActiveCue, parseVtt, type VttCue } from '../utils/vttParser';
 import { getAuthToken } from '../api';
-import { isTv } from '../utils/device';
+import { usePlatform } from '../context/PlatformContext';
+import { tvFocusClass } from './android/focus';
+import PlayerTrackMenu from './player/PlayerTrackMenu';
+import PlayerSettingsMenu from './player/PlayerSettingsMenu';
 
 interface SubtitleOption {
   index: number;
@@ -13,12 +16,6 @@ interface SubtitleOption {
   src: string;
   language: string;
   bitmap?: boolean;
-}
-
-interface AudioOption {
-  index: number;
-  label: string;
-  language: string;
 }
 
 interface Props {
@@ -110,60 +107,6 @@ async function tryPlay(el: HTMLMediaElement) {
   try { await el.play(); } catch { /* ignore */ }
 }
 
-function TrackMenu({ open, onClose, audioOptions, subtitleOptions, activeAudio, activeSub, onAudio, onSub }: {
-  open: boolean;
-  onClose: () => void;
-  audioOptions: AudioOption[];
-  subtitleOptions: { index: number; label: string }[];
-  activeAudio: number;
-  activeSub: number;
-  onAudio: (i: number) => void;
-  onSub: (i: number) => void;
-}) {
-  if (!open) return null;
-  return (
-    <>
-      <div className="fixed inset-0 z-40" onClick={onClose} aria-hidden />
-      <div className="absolute bottom-full right-0 mb-3 z-50 w-[min(320px,calc(100vw-2rem))] rounded-2xl border border-white/10 bg-black/95 backdrop-blur-xl shadow-2xl overflow-hidden animate-fade-in" onClick={e => e.stopPropagation()}>
-        <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between">
-          <span className="text-sm font-semibold text-white/90">Audio y subtítulos</span>
-          <Languages size={16} className="text-accent-glow" />
-        </div>
-        <div className="max-h-[50vh] overflow-y-auto">
-          <div className="py-2 border-b border-white/10">
-            <p className="px-4 py-1.5 text-[11px] font-semibold text-gray-400 uppercase tracking-widest">Audio</p>
-            {audioOptions.map(a => (
-              <button key={a.index} type="button" onClick={() => onAudio(a.index)}
-                className={`w-full text-left px-4 py-3 text-sm hover:bg-white/10 flex items-center justify-between ${activeAudio === a.index ? 'text-accent-glow bg-white/5' : 'text-white/90'}`}>
-                <span>{a.label}</span>
-                {activeAudio === a.index && <span className="text-accent-glow text-xs font-bold">●</span>}
-              </button>
-            ))}
-          </div>
-          <div className="py-2">
-            <p className="px-4 py-1.5 text-[11px] font-semibold text-gray-400 uppercase tracking-widest flex items-center gap-1.5">
-              <Subtitles size={12} /> Subtítulos
-            </p>
-            <button type="button" onClick={() => onSub(-1)}
-              className={`w-full text-left px-4 py-3 text-sm hover:bg-white/10 flex items-center justify-between ${activeSub === -1 ? 'text-accent-glow bg-white/5' : 'text-white/90'}`}>
-              <span>Desactivados</span>
-              {activeSub === -1 && <span className="text-accent-glow text-xs font-bold">●</span>}
-            </button>
-            {subtitleOptions.map(t => (
-              <button key={t.index} type="button" onClick={() => onSub(t.index)}
-                className={`w-full text-left px-4 py-3 text-sm hover:bg-white/10 flex items-center justify-between ${activeSub === t.index ? 'text-accent-glow bg-white/5' : 'text-white/90'}`}>
-                <span>{t.label}</span>
-                {activeSub === t.index && <span className="text-accent-glow text-xs font-bold">●</span>}
-              </button>
-            ))}
-            {subtitleOptions.length === 0 && <p className="px-4 py-2 text-xs text-gray-500">Sin subtítulos</p>}
-          </div>
-        </div>
-      </div>
-    </>
-  );
-}
-
 export default function VideoPlayer({
   src, compatSrc, compatAudioSrc, title, subtitles = [], probeAudioTracks = [], onBack, poster,
   knownDuration = null, needsAudioCompat = false, preferredAudioIndex = 0,
@@ -172,6 +115,7 @@ export default function VideoPlayer({
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const progressRef = useRef<HTMLDivElement>(null);
+  const playBtnRef = useRef<HTMLButtonElement>(null);
   const hideTimer = useRef<ReturnType<typeof setTimeout>>();
   const audioSeekTimer = useRef<ReturnType<typeof setTimeout>>();
   const subsInit = useRef(false);
@@ -212,7 +156,11 @@ export default function VideoPlayer({
   const [activeCue, setActiveCue] = useState<string | null>(null);
   const [loadingSubs, setLoadingSubs] = useState(false);
   const [subError, setSubError] = useState<string | null>(null);
-  const tvMode = isTv();
+  const { isAndroidMobile, isAndroidTv } = usePlatform();
+  const tvMode = isAndroidTv;
+  const mobileMode = isAndroidMobile;
+  const playerVariant = tvMode ? 'tv' as const : mobileMode ? 'mobile' as const : 'web' as const;
+  const hideDelay = tvMode ? 8000 : mobileMode ? 5000 : 4000;
 
   const isSplit = playback.engine === 'split';
   const isTranscode = playback.engine === 'transcode';
@@ -394,8 +342,8 @@ export default function VideoPlayer({
   const reveal = useCallback(() => {
     setShowControls(true);
     if (hideTimer.current) clearTimeout(hideTimer.current);
-    if (playing) hideTimer.current = setTimeout(() => setShowControls(false), 4000);
-  }, [playing]);
+    if (playing) hideTimer.current = setTimeout(() => setShowControls(false), hideDelay);
+  }, [playing, hideDelay]);
 
   const togglePlay = useCallback(() => {
     const v = videoRef.current;
@@ -426,16 +374,32 @@ export default function VideoPlayer({
   };
 
   const toggleFs = useCallback(async () => {
+    if (tvMode || mobileMode) return;
     const el = containerRef.current;
     if (!el) return;
     try {
       document.fullscreenElement ? await document.exitFullscreen() : await el.requestFullscreen();
     } catch { /* ignore */ }
-  }, []);
+  }, [tvMode, mobileMode]);
+
+  const seekFromPointer = useCallback((clientX: number) => {
+    const bar = progressRef.current;
+    if (!bar || !duration) return;
+    const rect = bar.getBoundingClientRect();
+    const pct = (clientX - rect.left) / rect.width;
+    seekTo(Math.max(0, Math.min(1, pct)) * duration);
+  }, [duration, seekTo]);
 
   const btn = `rounded-xl hover:bg-white/15 active:bg-white/20 transition-all hover:scale-105 active:scale-95 focus-visible:outline-none ${
-    tvMode ? 'p-3.5 min-h-[48px] min-w-[48px] flex items-center justify-center' : 'p-2.5'
+    tvMode
+      ? `p-4 min-h-[56px] min-w-[56px] flex items-center justify-center ${tvFocusClass}`
+      : mobileMode
+        ? 'p-3 min-h-[48px] min-w-[48px] flex items-center justify-center'
+        : 'p-2.5'
   }`;
+
+  const iconSize = tvMode ? 28 : mobileMode ? 26 : 24;
+  const skipIcon = tvMode ? 26 : 20;
 
   useEffect(() => {
     subsInit.current = false;
@@ -533,6 +497,8 @@ export default function VideoPlayer({
     if (el && !document.fullscreenElement) {
       el.requestFullscreen().catch(() => {});
     }
+    const t = window.setTimeout(() => playBtnRef.current?.focus(), 400);
+    return () => clearTimeout(t);
   }, [tvMode]);
 
   useEffect(() => {
@@ -549,11 +515,21 @@ export default function VideoPlayer({
           break;
         case 'ArrowLeft':
           e.preventDefault();
-          seekTo(currentTime - 10);
+          seekTo(currentTime - (tvMode ? 30 : 10));
           break;
         case 'ArrowRight':
           e.preventDefault();
-          seekTo(currentTime + 10);
+          seekTo(currentTime + (tvMode ? 30 : 10));
+          break;
+        case 'MediaFastForward':
+        case 'MediaTrackNext':
+          e.preventDefault();
+          seekTo(currentTime + 30);
+          break;
+        case 'MediaRewind':
+        case 'MediaTrackPrevious':
+          e.preventDefault();
+          seekTo(currentTime - 30);
           break;
         case 'ArrowUp':
           e.preventDefault();
@@ -574,6 +550,14 @@ export default function VideoPlayer({
         case 'c':
           e.preventDefault();
           setShowLangMenu(s => !s);
+          setShowSettings(false);
+          break;
+        case 's':
+          if (subtitleOptions.length > 0) {
+            e.preventDefault();
+            if (activeSubRef.current >= 0) selectSub(-1);
+            else selectSub(subtitleOptions[0].index);
+          }
           break;
         case 'Escape':
         case 'Backspace':
@@ -596,7 +580,7 @@ export default function VideoPlayer({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [togglePlay, seekTo, currentTime, volume, toggleFs, toggleMute, reveal, tvMode, onBack, showLangMenu, showSettings]);
+  }, [togglePlay, seekTo, currentTime, volume, toggleFs, toggleMute, reveal, tvMode, onBack, showLangMenu, showSettings, subtitleOptions]);
 
   useEffect(() => {
     const onFs = () => setFullscreen(!!document.fullscreenElement);
@@ -642,9 +626,20 @@ export default function VideoPlayer({
   }, [playback.engine, playback.audioIndex, compatSrc, compatAudioSrc, goTranscode, reloadAudio, videoSrc]);
 
   return (
-    <div ref={containerRef} className="relative w-full h-screen bg-black overflow-hidden select-none"
-      onMouseMove={reveal} onMouseLeave={() => playing && setShowControls(false)}
-      onClick={e => { if (!(e.target as HTMLElement).closest('[data-controls]')) { togglePlay(); reveal(); } }}>
+    <div
+      ref={containerRef}
+      className={`player-shell relative w-full bg-black overflow-hidden select-none touch-none ${
+        tvMode ? 'player-tv h-screen' : mobileMode ? 'player-mobile h-[100dvh]' : 'h-screen'
+      }`}
+      onMouseMove={reveal}
+      onMouseLeave={() => playing && !tvMode && setShowControls(false)}
+      onClick={e => {
+        if ((e.target as HTMLElement).closest('[data-controls]')) return;
+        if (showLangMenu || showSettings) return;
+        togglePlay();
+        reveal();
+      }}
+    >
 
       <video
         key={isTranscode ? playback.muxSrc : 'direct-video'}
@@ -743,17 +738,23 @@ export default function VideoPlayer({
       )}
 
       {activeCue && (
-        <div className="absolute bottom-28 md:bottom-32 left-0 right-0 z-[25] flex justify-center px-4 pointer-events-none">
-          <p className="tv-subtitle text-center text-white text-base md:text-xl font-medium leading-relaxed max-w-4xl bg-black/85 px-4 py-2.5 rounded-xl shadow-2xl whitespace-pre-line border border-white/10">
+        <div className={`absolute left-0 right-0 z-[25] flex justify-center px-4 pointer-events-none ${
+          tvMode ? 'bottom-36' : mobileMode ? 'bottom-36' : 'bottom-28 md:bottom-32'
+        }`}>
+          <p className="player-subtitle-cue text-center text-white font-medium leading-relaxed max-w-5xl bg-black/85 px-5 py-3 rounded-xl shadow-2xl whitespace-pre-line border border-white/10">
             {activeCue}
           </p>
         </div>
       )}
       {loadingSubs && activeSub >= 0 && !activeCue && (
-        <div className="absolute bottom-28 left-1/2 -translate-x-1/2 z-[25] text-xs text-white/50">Cargando subtítulos…</div>
+        <div className={`absolute left-1/2 -translate-x-1/2 z-[25] text-white/50 ${tvMode ? 'bottom-36 text-base' : 'bottom-28 text-xs'}`}>
+          Cargando subtítulos…
+        </div>
       )}
       {subError && activeSub >= 0 && !loadingSubs && (
-        <div className="absolute bottom-28 left-1/2 -translate-x-1/2 z-[25] text-xs text-amber-400 bg-black/70 px-3 py-1 rounded-lg">{subError}</div>
+        <div className={`absolute left-1/2 -translate-x-1/2 z-[25] text-amber-400 bg-black/70 px-4 py-2 rounded-lg ${tvMode ? 'bottom-36 text-sm' : 'bottom-28 text-xs'}`}>
+          {subError}
+        </div>
       )}
 
       {buffering && !error && (
@@ -776,104 +777,144 @@ export default function VideoPlayer({
         <div className="absolute inset-x-0 bottom-0 h-48 bg-gradient-to-t from-black via-black/80 to-transparent" />
       </div>
 
-      <div data-controls className={`absolute top-0 inset-x-0 z-20 flex items-center gap-3 px-5 md:px-8 py-5 transition-all duration-500 ${showControls ? 'opacity-100' : 'opacity-0 -translate-y-4 pointer-events-none'}`}>
-        <button type="button" onClick={e => { e.stopPropagation(); onBack(); }} className={`${btn} bg-black/30 backdrop-blur-sm`} aria-label="Volver">
-          <ArrowLeft size={22} />
+      <div data-controls className={`absolute top-0 inset-x-0 z-20 flex items-center gap-3 transition-all duration-500 safe-top ${
+        tvMode ? 'px-8 py-6' : mobileMode ? 'px-4 py-4' : 'px-5 md:px-8 py-5'
+      } ${showControls ? 'opacity-100' : 'opacity-0 -translate-y-4 pointer-events-none'}`}>
+        <button type="button" onClick={e => { e.stopPropagation(); onBack(); }} className={`${btn} bg-black/40 backdrop-blur-sm`} aria-label="Volver">
+          <ArrowLeft size={tvMode ? 28 : 22} />
         </button>
         <div className="flex-1 min-w-0">
-          <h1 className="text-base md:text-xl font-bold truncate">{title}</h1>
+          <h1 className={`font-bold truncate ${tvMode ? 'text-2xl' : mobileMode ? 'text-base' : 'text-base md:text-xl'}`}>{title}</h1>
         </div>
       </div>
 
       {!playing && !buffering && !error && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <div className="bg-black/50 backdrop-blur-md rounded-full p-6 ring-1 ring-white/20">
-            <Play size={44} fill="white" className="text-white ml-1" />
+          <div className={`bg-black/50 backdrop-blur-md rounded-full ring-1 ring-white/20 ${tvMode ? 'p-8' : 'p-6'}`}>
+            <Play size={tvMode ? 56 : 44} fill="white" className="text-white ml-1" />
           </div>
         </div>
       )}
 
-      <div data-controls className={`absolute bottom-0 inset-x-0 z-20 transition-all duration-500 ${showControls ? 'opacity-100' : 'opacity-0 translate-y-6 pointer-events-none'}`} onClick={e => e.stopPropagation()}>
-        <div className="px-4 md:px-8 pb-6 pt-2">
-          <div ref={progressRef} className="group relative h-1 mb-5 cursor-pointer rounded-full bg-white/15 hover:h-1.5 transition-all"
-            onClick={e => {
-              const bar = progressRef.current;
-              if (!bar || !duration) return;
-              const r = (e.clientX - bar.getBoundingClientRect().left) / bar.clientWidth;
-              seekTo(Math.max(0, Math.min(1, r)) * duration);
-            }}>
+      <PlayerTrackMenu
+        open={showLangMenu}
+        onClose={() => setShowLangMenu(false)}
+        variant={playerVariant}
+        audioOptions={audioOptions}
+        subtitleOptions={subtitleOptions}
+        activeAudio={playback.audioIndex}
+        activeSub={activeSub}
+        onAudio={selectAudio}
+        onSub={selectSub}
+      />
+
+      <PlayerSettingsMenu
+        open={showSettings}
+        onClose={() => setShowSettings(false)}
+        variant={playerVariant}
+        playbackRate={playbackRate}
+        onRate={setPlaybackRate}
+      />
+
+      <div data-controls className={`absolute bottom-0 inset-x-0 z-20 transition-all duration-500 safe-bottom ${
+        showControls ? 'opacity-100' : 'opacity-0 translate-y-6 pointer-events-none'
+      }`} onClick={e => e.stopPropagation()}>
+        <div className={tvMode ? 'px-8 pb-8 pt-3' : mobileMode ? 'px-4 pb-6 pt-2' : 'px-4 md:px-8 pb-6 pt-2'}>
+          <div
+            ref={progressRef}
+            className={`group relative mb-5 cursor-pointer rounded-full bg-white/15 transition-all ${
+              tvMode || mobileMode ? 'h-2.5 hover:h-3' : 'h-1 hover:h-1.5'
+            }`}
+            onClick={e => seekFromPointer(e.clientX)}
+            onTouchStart={e => { if (e.touches[0]) seekFromPointer(e.touches[0].clientX); }}
+            onTouchMove={e => { e.preventDefault(); if (e.touches[0]) seekFromPointer(e.touches[0].clientX); }}
+          >
             <div className="absolute inset-y-0 left-0 bg-white/25 rounded-full" style={{ width: `${bufPct}%` }} />
             <div className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-accent to-accent-glow" style={{ width: `${progress}%` }} />
-            <div className="absolute top-1/2 -translate-y-1/2 w-4 h-4 bg-white rounded-full shadow-lg opacity-0 group-hover:opacity-100 -ml-2 transition-opacity" style={{ left: `${progress}%` }} />
+            <div
+              className={`absolute top-1/2 -translate-y-1/2 bg-white rounded-full shadow-lg -ml-2 transition-opacity ${
+                tvMode || mobileMode ? 'w-5 h-5 opacity-100' : 'w-4 h-4 opacity-0 group-hover:opacity-100'
+              }`}
+              style={{ left: `${progress}%` }}
+            />
           </div>
 
-          <div className="flex items-center gap-2 md:gap-4 bg-black/40 backdrop-blur-md rounded-2xl px-3 py-2 md:px-4 border border-white/10">
+          <div className={`flex items-center gap-2 bg-black/50 backdrop-blur-md rounded-2xl border border-white/10 ${
+            tvMode ? 'px-4 py-3 gap-3' : mobileMode ? 'px-2 py-2' : 'px-3 py-2 md:px-4'
+          }`}>
             <div className="flex items-center">
-              <button type="button" onClick={() => seekTo(currentTime - 10)} className={`${btn} hidden sm:flex`}><SkipBack size={20} /></button>
-              <button type="button" onClick={togglePlay} className={`${btn} mx-0.5`}>
-                {playing ? <Pause size={24} fill="white" /> : <Play size={24} fill="white" />}
+              <button type="button" onClick={() => seekTo(currentTime - (tvMode ? 30 : 10))} className={btn} aria-label="Retroceder">
+                <SkipBack size={skipIcon} />
               </button>
-              <button type="button" onClick={() => seekTo(currentTime + 10)} className={`${btn} hidden sm:flex`}><SkipForward size={20} /></button>
+              <button ref={playBtnRef} type="button" onClick={togglePlay} className={`${btn} mx-0.5`} aria-label={playing ? 'Pausar' : 'Reproducir'}>
+                {playing ? <Pause size={iconSize} fill="white" /> : <Play size={iconSize} fill="white" />}
+              </button>
+              <button type="button" onClick={() => seekTo(currentTime + (tvMode ? 30 : 10))} className={btn} aria-label="Avanzar">
+                <SkipForward size={skipIcon} />
+              </button>
             </div>
 
-            <span className="text-xs md:text-sm text-white/80 tabular-nums min-w-[88px]">
+            <span className={`text-white/80 tabular-nums shrink-0 ${tvMode ? 'text-base min-w-[110px]' : 'text-xs md:text-sm min-w-[88px]'}`}>
               {formatTime(currentTime)}<span className="text-white/40 mx-1">/</span>{formatTime(duration)}
             </span>
 
             <div className="flex-1" />
 
-            <div className="relative">
-              <button type="button" onClick={() => { setShowLangMenu(s => !s); setShowSettings(false); }}
-                className={`${btn} flex items-center gap-2 ${(activeSub >= 0 || audioOptions.length > 1) ? 'text-accent-glow bg-accent/10 ring-1 ring-accent/30' : ''}`}>
-                <Languages size={20} />
-                <span className="hidden md:inline text-xs font-medium">Audio</span>
-              </button>
-              <TrackMenu open={showLangMenu} onClose={() => setShowLangMenu(false)}
-                audioOptions={audioOptions} subtitleOptions={subtitleOptions}
-                activeAudio={playback.audioIndex} activeSub={activeSub}
-                onAudio={selectAudio} onSub={selectSub} />
-            </div>
-
-            {subtitleOptions.length > 0 && (
-              <button type="button" onClick={() => activeSub >= 0 ? selectSub(-1) : selectSub(subtitleOptions[0].index)}
-                className={`${btn} ${activeSub >= 0 ? 'text-accent-glow bg-accent/10 ring-1 ring-accent/30' : ''}`}>
-                <Subtitles size={20} />
+            {(audioOptions.length > 1 || subtitleOptions.length > 0) && (
+              <button
+                type="button"
+                onClick={() => { setShowLangMenu(s => !s); setShowSettings(false); }}
+                className={`${btn} flex items-center gap-2 ${(activeSub >= 0 || audioOptions.length > 1) ? 'text-accent-glow bg-accent/10 ring-1 ring-accent/30' : ''}`}
+                aria-label="Audio y subtítulos"
+              >
+                <Languages size={tvMode ? 26 : 20} />
+                {!mobileMode && !tvMode && <span className="hidden md:inline text-xs font-medium">Audio</span>}
               </button>
             )}
 
-            <div className="flex items-center gap-1 group/vol">
-              <button type="button" onClick={toggleMute} className={btn}>
-                {muted || volume === 0 ? <VolumeX size={20} /> : <Volume2 size={20} />}
+            {subtitleOptions.length > 0 && (
+              <button
+                type="button"
+                onClick={() => activeSub >= 0 ? selectSub(-1) : selectSub(subtitleOptions[0].index)}
+                className={`${btn} ${activeSub >= 0 ? 'text-accent-glow bg-accent/10 ring-1 ring-accent/30' : ''}`}
+                aria-label="Subtítulos"
+              >
+                <Subtitles size={tvMode ? 26 : 20} />
               </button>
-              <input type="range" min={0} max={1} step={0.05} value={muted ? 0 : volume}
-                onChange={e => changeVol(parseFloat(e.target.value))}
-                className="w-0 group-hover/vol:w-24 transition-all accent-accent hidden md:block h-1 cursor-pointer" />
-            </div>
+            )}
 
-            <div className="relative">
-              <button type="button" onClick={() => { setShowSettings(s => !s); setShowLangMenu(false); }} className={btn}>
-                <Settings size={20} />
-              </button>
-              {showSettings && (
-                <>
-                  <div className="fixed inset-0 z-40" onClick={() => setShowSettings(false)} />
-                  <div className="absolute right-0 bottom-full mb-3 z-50 bg-black/95 border border-white/10 rounded-xl py-2 min-w-[150px] shadow-2xl">
-                    <p className="px-4 py-1.5 text-[11px] font-semibold text-gray-400 uppercase">Velocidad</p>
-                    {[0.5, 0.75, 1, 1.25, 1.5, 2].map(r => (
-                      <button key={r} type="button" onClick={() => { setPlaybackRate(r); setShowSettings(false); }}
-                        className={`w-full text-left px-4 py-2.5 text-sm hover:bg-white/10 ${playbackRate === r ? 'text-accent-glow font-medium' : ''}`}>
-                        {r === 1 ? 'Normal' : `${r}x`}
-                      </button>
-                    ))}
-                  </div>
-                </>
-              )}
-            </div>
+            {!tvMode && !mobileMode && (
+              <div className="flex items-center gap-1 group/vol">
+                <button type="button" onClick={toggleMute} className={btn}>
+                  {muted || volume === 0 ? <VolumeX size={20} /> : <Volume2 size={20} />}
+                </button>
+                <input type="range" min={0} max={1} step={0.05} value={muted ? 0 : volume}
+                  onChange={e => changeVol(parseFloat(e.target.value))}
+                  className="w-0 group-hover/vol:w-24 transition-all accent-accent hidden md:block h-1 cursor-pointer" />
+              </div>
+            )}
 
-            <button type="button" onClick={toggleFs} className={btn}>
-              {fullscreen ? <Minimize size={20} /> : <Maximize size={20} />}
+            <button
+              type="button"
+              onClick={() => { setShowSettings(s => !s); setShowLangMenu(false); }}
+              className={btn}
+              aria-label="Ajustes"
+            >
+              <Settings size={tvMode ? 26 : 20} />
             </button>
+
+            {!tvMode && !mobileMode && (
+              <button type="button" onClick={toggleFs} className={btn} aria-label="Pantalla completa">
+                {fullscreen ? <Minimize size={20} /> : <Maximize size={20} />}
+              </button>
+            )}
           </div>
+
+          {tvMode && (
+            <p className="text-center text-xs text-white/35 mt-3">
+              ◀ ▶ ±30s · OK reproducir · C audio/subs · S subtítulos · Atrás salir
+            </p>
+          )}
         </div>
       </div>
     </div>

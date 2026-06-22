@@ -102,9 +102,35 @@ html.tv-mode .card-hover {
   @apply hover:scale-[1.02];
 }
 
-html.tv-mode .tv-subtitle {
-  font-size: clamp(1.35rem, 2.5vw, 2rem) !important;
-  line-height: 1.5;
+html.tv-mode .tv-subtitle,
+html.tv-mode .player-subtitle-cue {
+  font-size: clamp(1.5rem, 2.8vw, 2.25rem) !important;
+  line-height: 1.45;
+}
+
+/* Reproductor Android móvil */
+html.android-mobile .player-mobile {
+  touch-action: manipulation;
+}
+
+html.android-mobile .player-subtitle-cue {
+  font-size: clamp(1.1rem, 4.5vw, 1.5rem) !important;
+  line-height: 1.4;
+}
+
+html.android-mobile .player-mobile .player-subtitle-cue {
+  max-width: 96vw;
+}
+
+/* Reproductor Android TV */
+html.tv-mode .player-tv .player-subtitle-cue {
+  max-width: 80vw;
+  padding: 0.75rem 1.5rem;
+}
+
+html.tv-mode .player-tv video {
+  width: 100%;
+  height: 100%;
 }
 
 /* Modo Android móvil */
